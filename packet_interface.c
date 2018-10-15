@@ -53,10 +53,19 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 
 pkt_status_code pkt_encode(const pkt_t* pkt, char *buf, size_t *len){
 	printf("encode:\n");
-	int payloadLen = pkt_get_length(pkt);
-	printf("size of a packet: %d", sizeof(pkt_t));
+	int pktLength = pkt_get_length(pkt)
+	int totalSize = sizeof(pkt_t) + pktLength - sizeof(char*);
+	if(totalSize > *len){ //buffer trop petit
+		return E_NOMEM;
+	}
 
-	printf("%d\n", payloadLen);
+	if(pktLength == 0){ //no payload
+		memcpy(pkt->payload, data, length);
+	}else{// has a payload
+
+	}
+	
+	printf("\n%d  %d \n", totalSize, *len);
 }
 
 ptypes_t pkt_get_type(const pkt_t* pkt){
@@ -232,7 +241,7 @@ int main(){
 	printf("payload : %s\n", payload);
 
 	printf("\n");
-	size_t len = 9;
+	size_t len = 30;
 	char* buff = malloc(len*sizeof(char));
 	pkt_encode(paquet, buff, &len);
 
