@@ -1,4 +1,11 @@
 #include "packet_interface.h"
+#include <stddef.h> /* size_t */ 
+#include <stdint.h> /* uintx_t */
+#include <stdio.h>
+#include <stdlib.h> 
+#include <string.h> /* memcpy */
+#include <netinet/in.h> /* pour les ntohs, ntohl, htons, htonl */
+
 
 /* Extra #includes */
 /* Your code will be inserted here */
@@ -40,6 +47,7 @@ unsigned int crc32b(unsigned char *message) {
 
 pkt_t* pkt_new(){
 	pkt_t* pkt_ptr = malloc(sizeof(struct pkt));
+	return pkt_ptr;
 }
 	
 void pkt_del(pkt_t *pkt){
@@ -53,7 +61,7 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 
 pkt_status_code pkt_encode(const pkt_t* pkt, char *buf, size_t *len){
 	printf("encode:\n");
-	int pktLength = pkt_get_length(pkt)
+	int pktLength = pkt_get_length(pkt);
 	int totalSize = sizeof(pkt_t) + pktLength - sizeof(char*);
 	if(totalSize > *len){ //buffer trop petit
 		return E_NOMEM;
