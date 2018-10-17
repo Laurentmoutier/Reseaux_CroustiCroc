@@ -52,20 +52,27 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 }
 
 pkt_status_code pkt_encode(const pkt_t* pkt, char *buf, size_t *len){
-	printf("encode:\n");
-	int pktLength = pkt_get_length(pkt)
-	int totalSize = sizeof(pkt_t) + pktLength - sizeof(char*);
+	printf("encode: (payload length = %d) \n", pkt_get_length(pkt));
+	int payLength = pkt_get_length(pkt);
+	int totalSize = sizeof(pkt_t) + payLength - sizeof(char*);
 	if(totalSize > *len){ //buffer trop petit
 		return E_NOMEM;
 	}
-
-	if(pktLength == 0){ //no payload
-		memcpy(pkt->payload, data, length);
-	}else{// has a payload
-
+	int copyLength = 1 + 1 + 2 + 4 + 4; ///8bits + seqNum(8bit) + length(16bit) + timeStamp(32bit) + crc32(32bit)
+	memcpy(buf, pkt, copyLength);
+	if(payLength == 0){ //no payload
+		return PKT_OK;
 	}
-	
-	printf("\n%d  %d \n", totalSize, *len);
+	// has a payload
+	printf("%s\n", pkt->payload);
+	memcpy(buf + copyLength, pkt->payload, payLength);
+	memcpy(buf + copyLength + payLength, &pkt->crc2, 4);
+	//test :
+	char* payTest = malloc(payLength);
+	memcpy(payTest, buf + copyLength, payLength);
+	printf("%s\n", payTest);
+	// successfull test!
+	return PKT_OK;
 }
 
 ptypes_t pkt_get_type(const pkt_t* pkt){
@@ -210,16 +217,18 @@ int main(){
 
 	printf("setters...\n");
 	pkt_status_code typeRet = pkt_set_type(paquet, 0b00);
-	pkt_status_code trRet = pkt_set_tr(paquet, 0b1);
-	pkt_status_code winRet = pkt_set_window(paquet, 0b11011);
-	pkt_status_code seqRet = pkt_set_seqnum(paquet, 0b11101111);
-	pkt_status_code crc1Ret = pkt_set_crc1(paquet, 0b11111111111111111101111111111111);
-	pkt_status_code crc2Ret = pkt_set_crc2(paquet, 0b11111111111110111111111111111111);
-	pkt_status_code timeRet = pkt_set_timestamp(paquet, 0b11111111101111111111111111111111);
+	pkt_status_code trRet = pkt_set_tr(paquet, 0b0);
+	pkt_status_code winRet = pkt_set_window(paquet, 0b00000);
+	pkt_status_code seqRet = pkt_set_seqnum(paquet, 0b0000000);
+	pkt_status_code lenRet = pkt_set_length(paquet, 0b0000000);
+
+	pkt_status_code crc1Ret = pkt_set_crc1(paquet, 0b00011000000110000001100000011000);
+	pkt_status_code crc2Ret = pkt_set_crc2(paquet, 0b10001111111111111111111111110001);
+	pkt_status_code timeRet = pkt_set_timestamp(paquet, 0b01111111111111111111111111111110);
 
 
 	char* pay = (char*)malloc(8*sizeof(char));
-	strcpy(pay, "hello");
+	strcpy(pay, "aaaaa");
 	pkt_set_payload(paquet, pay, 5);
 
 	ptypes_t type = pkt_get_type(paquet);
@@ -244,7 +253,6 @@ int main(){
 	size_t len = 30;
 	char* buff = malloc(len*sizeof(char));
 	pkt_encode(paquet, buff, &len);
-
 	pkt_del(paquet);
    	return 0;
 }
