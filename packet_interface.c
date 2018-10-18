@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h> 
 #include <string.h> /* memcpy */
-#include <netinet/in.h> /* pour les ntohs, ntohl, htons, htonl */
+#include <arpa/inet.h> // NEW INCLUDE: mettre sur inginious
 
 
 /* Extra #includes */
@@ -60,15 +60,9 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 }
 
 pkt_status_code pkt_encode(const pkt_t* pkt, char *buf, size_t *len){
-<<<<<<< HEAD
 	printf("encode: (payload length = %d) \n", pkt_get_length(pkt));
 	int payLength = pkt_get_length(pkt);
 	int totalSize = sizeof(pkt_t) + payLength - sizeof(char*);
-=======
-	printf("encode:\n");
-	int pktLength = pkt_get_length(pkt);
-	int totalSize = sizeof(pkt_t) + pktLength - sizeof(char*);
->>>>>>> 6fd2b00943a54de709b32d7f2562b4d9b5acdff9
 	if(totalSize > *len){ //buffer trop petit
 		return E_NOMEM;
 	}
@@ -81,11 +75,6 @@ pkt_status_code pkt_encode(const pkt_t* pkt, char *buf, size_t *len){
 	printf("%s\n", pkt->payload);
 	memcpy(buf + copyLength, pkt->payload, payLength);
 	memcpy(buf + copyLength + payLength, &pkt->crc2, 4);
-	//test :
-	char* payTest = malloc(payLength);
-	memcpy(payTest, buf + copyLength, payLength);
-	printf("%s\n", payTest);
-	// successfull test!
 	return PKT_OK;
 }
 
