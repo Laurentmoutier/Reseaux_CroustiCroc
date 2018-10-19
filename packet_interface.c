@@ -13,9 +13,14 @@
 /* Your code will be inserted here */
 
 struct __attribute__((__packed__)) pkt {
+	/* ////
 	unsigned int type:2;
 	unsigned int trFlag:1;
 	unsigned int window:5; // network byte order sur certains fields ==> changer les getters et setters!!
+	//// */
+	unsigned int window:5; // network byte order sur certains fields ==> changer les getters et setters!!
+	unsigned int trFlag:1;
+	unsigned int type:2;
 	uint8_t seqNum;
 	uint16_t length;
 	uint32_t timestamp;
@@ -38,6 +43,7 @@ void pkt_del(pkt_t *pkt){
 }
 
 void setTypeTrWinFromData(const char* data, unsigned int* type, unsigned int* trFlag, unsigned int* window){
+	 /* /// inversement des 3 types
 	int typeMask = 0b11;
 	int trMask = 0b100;
 	int windowMask = 0b11111000;
@@ -45,6 +51,15 @@ void setTypeTrWinFromData(const char* data, unsigned int* type, unsigned int* tr
 	*type = *dat & typeMask;
 	*trFlag = (*dat & trMask) >> 2;
 	*window = (*dat & windowMask) >> 3;
+    /// */
+    int windowMask = 0b11111;
+    int trMask = 0b100000;
+    int typeMask = 0b11000000;
+    unsigned int *dat = (unsigned int*) data;
+    *type = *dat & windowMask;
+    *trFlag = (*dat & trMask) >> 5;
+    *window = (*dat & typeMask) >> 6;
+    printf("%s \n", data);
 }
 
 pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
