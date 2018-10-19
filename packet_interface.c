@@ -27,26 +27,6 @@ struct __attribute__((__packed__)) pkt {
 /* Extra code */
 /* Your code will be inserted here */
 
-unsigned int crc32b(unsigned char *message) {
-	// fonction prise de stackoverflow. Il faudra la re-ecrire.
-	// https://stackoverflow.com/questions/21001659/crc32-algorithm-implementation-in-c-without-a-look-up-table-and-with-a-public-li
-   int i, j;
-   unsigned int byte, crc, mask;
-
-   i = 0;
-   crc = 0xFFFFFFFF;
-   while (message[i] != 0) {
-      byte = message[i];            // Get next byte.
-      crc = crc ^ byte;
-      for (j = 7; j >= 0; j--) {    // Do eight times.
-         mask = -(crc & 1);
-         crc = (crc >> 1) ^ (0xEDB88320 & mask);
-      }
-      i = i + 1;
-   }
-   return ~crc;
-}
-
 pkt_t* pkt_new(){
 	pkt_t* pkt_ptr = malloc(sizeof(struct pkt));
 	return pkt_ptr;
@@ -84,14 +64,60 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 	uint32_t timestamp;
 	memcpy(&timestamp, data+4, 4);
 	timestamp = htonl(timestamp);
-	uint32_t crc1;
-	memcpy(&crc1, data+8, 4);
-	crc1 = htonl(crc1);
+	uint32_t crc1Received;
+	memcpy(&crc1Received, data+8, 4);
+	crc1Received = htonl(crc1Received);
 	printf("time : %u\n", timestamp);
-	printf("crc1 : %u\n", crc1);
-// tr = 0 pour crc
-	char* payload; 
-	uint32_t crc2;
+	printf("crc1 : %u\n", crc1Received);
+
+	pkt_set_type(pkt, type);
+	pkt_set_tr(pkt, 0); // tr = 0 pour crc
+	pkt_set_window(pkt, window);
+	pkt_set_seqnum(pkt, seqNum);
+	pkt_set_length(pkt, length);
+	pkt_set_timestamp(pkt, timestamp);
+	uLong crc1Computed = crc32(0L, Z_NULL, 0);
+	int i = 0;
+	while (i != 8) {
+		crc1Computed = crc32(crc1Computed, (const Bytef *)pkt, 1);
+		i++;
+	}
+	// crc1Computed = crc32(0L, Z_NULL, 0);  //perhaps this form is expected (with length=8 and therefore no loop)
+	// crc1Computed = crc32(crc1Computed, (const Bytef *)pkt, 8);
+	pkt_set_tr(pkt, trFlag);
+	if (crc1Computed != crc1Received){
+		return E_CRC;
+	}
+	pkt_set_crc1(pkt, crc1Received);
+	if (type == 0){
+		return E_TYPE;
+	}
+	if (length == 0){
+		if (len != 12){
+			return E_LENGTH;
+		}
+	}else{
+		if (len != 12+length+4){
+			return E_LENGTH;
+		}
+
+		uint32_t crc2Received;
+		memcpy(&crc2Received, data+12+length, 4);
+		crc2Received = htonl(crc2Received);
+		uLong crc2Computed = crc32(0L, Z_NULL, 0);
+		i = 0;
+		while (i != length) {
+			crc2Computed = crc32(crc2Computed, (const Bytef *)data+12, 1);
+			i++;
+		}
+		if (crc2Received != crc2Computed){
+			return E_CRC;
+		}
+		pkt_set_crc2(pkt, crc2Computed);
+		char* payload = malloc(length); 
+		memcpy(payload, data+12, length);	
+		pkt_set_payload(pkt, payload, length);
+	}
 }
 
 pkt_status_code pkt_encode(const pkt_t* pkt, char *buf, size_t *len){
@@ -239,7 +265,7 @@ pkt_status_code pkt_set_payload(pkt_t *pkt,
 		if(pkt->payload != NULL){
 			free(pkt->payload);
 		}
-		pkt->payload = malloc(length); //length + 1 ?
+		pkt->payload = malloc(length);
 		memcpy(pkt->payload, data, length);
 		pkt_set_length(pkt, length);
 		return PKT_OK;
@@ -257,15 +283,29 @@ int main(){
 	pkt_status_code winRet = pkt_set_window(paquet, 0b11111);
 	pkt_status_code seqRet = pkt_set_seqnum(paquet, 0b01000000);
 	pkt_status_code lenRet = pkt_set_length(paquet, 0b0000100);
-	// uLong crc1 = crc32(crc1, (const Bytef *)paquet, 8);
-	pkt_status_code crc1Ret = pkt_set_crc1(paquet, 0b10001111111111111111111111110001);
-	pkt_status_code crc2Ret = pkt_set_crc2(paquet, 0b10001111111111111111111111110001);
+	
+	uLong crc1 = crc32(0L, Z_NULL, 0);
+	int i = 0;
+	while (i != 8) {
+		crc1 = crc32(crc1, (const Bytef *)paquet, 1);
+		i++;
+	}
+	
+	pkt_status_code crc1Ret = pkt_set_crc1(paquet, crc1);
 	pkt_status_code timeRet = pkt_set_timestamp(paquet, 0b01111111111111111111111111111110);
 
 
 	char* pay = (char*)malloc(8*sizeof(char));
 	strcpy(pay, "aaaaa");
 	pkt_set_payload(paquet, pay, 5);
+	
+	uLong crc2 = crc32(0L, Z_NULL, 0);
+	i = 0;
+	while (i != pkt_get_length(paquet)) {
+		crc2 = crc32(crc2, (const Bytef *)paquet->payload, 1);
+		i++;
+	}
+	pkt_status_code crc2Ret = pkt_set_crc2(paquet, crc2);
 
 	ptypes_t type = pkt_get_type(paquet);
 	uint8_t tr = pkt_get_tr(paquet);
@@ -273,7 +313,7 @@ int main(){
 	uint8_t seqNum = pkt_get_seqnum(paquet);
 	uint16_t length = pkt_get_length(paquet);
 	uint32_t timestamp = pkt_get_timestamp(paquet);
-	// uint32_t crc1 = pkt_get_crc1(paquet);
+	uint32_t crcGet = pkt_get_crc1(paquet);
 	const char* payload = pkt_get_payload(paquet);
 
 	printf("get type: %u\n", type);
@@ -282,7 +322,7 @@ int main(){
 	printf("get seqNum: %u\n", seqNum);
 	printf("get length: %u\n", length);
 	printf("get timestamp: %u\n", timestamp);
-	// printf("get crc1: %u\n", crc1);
+	printf("get crc1: %u\n", crcGet);
 	printf("payload : %s\n", payload);
 
 	printf("\n");
