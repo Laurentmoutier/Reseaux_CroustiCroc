@@ -6,7 +6,6 @@
 #include <stdint.h> /* uintx_t */
 #include <stdlib.h>
 #include <string.h>
-#include <arpa/inet.h> // NEW INCLUDE: mettre sur inginious
 
 /* Raccourci pour struct pkt */
 typedef struct pkt pkt_t;
@@ -44,6 +43,7 @@ pkt_t* pkt_new();
  * ressources associees
  */
 void pkt_del(pkt_t*);
+unsigned int crc32b(unsigned char *message);
 
 /*
  * Decode des donnees recues et cree une nouvelle structure pkt.
@@ -65,7 +65,6 @@ void pkt_del(pkt_t*);
  * @return: Un code indiquant si l'operation a reussi ou representant
  *         l'erreur rencontree.
  */
-unsigned int crc32b(unsigned char *message);
 pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt);
 
 /*
