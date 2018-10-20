@@ -56,10 +56,9 @@ void setTypeTrWinFromData(const char* data, unsigned int* type, unsigned int* tr
     int trMask = 0b100000;
     int typeMask = 0b11000000;
     unsigned int *dat = (unsigned int*) data;
-    *type = *dat & windowMask;
+    *window = *dat & windowMask;
     *trFlag = (*dat & trMask) >> 5;
-    *window = (*dat & typeMask) >> 6;
-    printf("%s \n", data);
+    *type = (*dat & typeMask) >> 6;
 }
 
 pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
@@ -68,24 +67,31 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 	unsigned int trFlag;
 	unsigned int window; 
 	setTypeTrWinFromData(data, &type, &trFlag, &window);
+	
 	uint8_t seqNum = *(data + 1);
+	
 	uint16_t length;
 	memcpy(&length, data+2, 2);
 	length = ntohs(length);
+	
 	uint32_t timestamp;
 	memcpy(&timestamp, data+4, 4);
 	timestamp = ntohl(timestamp);
+	
 	uint32_t crc1Received;
 	memcpy(&crc1Received, data+8, 4);
 	crc1Received = ntohl(crc1Received);
+	
 	pkt_set_type(pkt, type);
 	pkt_set_tr(pkt, 0); // tr = 0 pour crc
 	pkt_set_window(pkt, window);
 	pkt_set_seqnum(pkt, seqNum);
 	pkt_set_length(pkt, length);
 	pkt_set_timestamp(pkt, timestamp);
+
 	uLong crc1Computed = crc32(0L, Z_NULL, 0);
 	crc1Computed = crc32(crc1Computed, (const Bytef *)pkt, 8);
+	
 	pkt_set_tr(pkt, trFlag); // tr was 0 for crc
 	if (crc1Computed != crc1Received){
 		return E_CRC;
