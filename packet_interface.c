@@ -13,9 +13,14 @@
 /* Your code will be inserted here */
 
 struct __attribute__((__packed__)) pkt {
+	/* ////
 	unsigned int type:2;
 	unsigned int trFlag:1;
 	unsigned int window:5; // network byte order sur certains fields ==> changer les getters et setters!!
+	//// */
+	unsigned int window:5; // network byte order sur certains fields ==> changer les getters et setters!!
+	unsigned int trFlag:1;
+	unsigned int type:2;
 	uint8_t seqNum;
 	uint16_t length;
 	uint32_t timestamp;
@@ -40,6 +45,7 @@ void pkt_del(pkt_t *pkt){
 }
 
 void setTypeTrWinFromData(const char* data, unsigned int* type, unsigned int* trFlag, unsigned int* window){
+	 /* /// inversement des 3 types
 	int typeMask = 0b11;
 	int trMask = 0b100;
 	int windowMask = 0b11111000;
@@ -47,6 +53,14 @@ void setTypeTrWinFromData(const char* data, unsigned int* type, unsigned int* tr
 	*type = *dat & typeMask;
 	*trFlag = (*dat & trMask) >> 2;
 	*window = (*dat & windowMask) >> 3;
+    /// */
+    int windowMask = 0b11111;
+    int trMask = 0b100000;
+    int typeMask = 0b11000000;
+    unsigned int *dat = (unsigned int*) data;
+    *window = *dat & windowMask;
+    *trFlag = (*dat & trMask) >> 5;
+    *type = (*dat & typeMask) >> 6;
 }
 
 pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
@@ -55,24 +69,31 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 	unsigned int trFlag;
 	unsigned int window; 
 	setTypeTrWinFromData(data, &type, &trFlag, &window);
+	
 	uint8_t seqNum = *(data + 1);
+	
 	uint16_t length;
 	memcpy(&length, data+2, 2);
 	length = ntohs(length);
+	
 	uint32_t timestamp;
 	memcpy(&timestamp, data+4, 4);
 	timestamp = ntohl(timestamp);
+	
 	uint32_t crc1Received;
 	memcpy(&crc1Received, data+8, 4);
 	crc1Received = ntohl(crc1Received);
+	
 	pkt_set_type(pkt, type);
 	pkt_set_tr(pkt, 0); // tr = 0 pour crc
 	pkt_set_window(pkt, window);
 	pkt_set_seqnum(pkt, seqNum);
 	pkt_set_length(pkt, length);
 	pkt_set_timestamp(pkt, timestamp);
+
 	uLong crc1Computed = crc32(0L, Z_NULL, 0);
 	crc1Computed = crc32(crc1Computed, (const Bytef *)pkt, 8);
+	
 	pkt_set_tr(pkt, trFlag); // tr was 0 for crc
 	if (crc1Computed != crc1Received){
 		return E_CRC;
