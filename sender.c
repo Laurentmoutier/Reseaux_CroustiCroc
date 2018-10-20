@@ -7,27 +7,36 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>  /* atoi */
-/*
-GROSSE ERREUR,
-prise en compte du cas ou on ne sait pas ou on est (premier_argument) seulement on le sait, puisque on est dans
-le main du sender ici ! 
-
-*/
+#include <sys/socket.h>
+#include <pthread.h>
+#include <arpa/inet.h> 
 
 /* struct de argv : 
 			- si -f : sender -f fichier host numero_du_port
 			- sinon : receiver/sender host numero_du_port symbole fichier 
 			  avec rajout possible à la fin : 2> fichier message_d_erreur
 */
-void connect(struct sockaddr_in6* si_other, char* hostname, int port){
-	//fill the socket struxture and connect to other socket
+void mainLoop(void* si_other, int sockFd, FILE * fd){
+	//while not all aknowledged: check if window is free, if yes send new paquet
+	//an unaknowledged paquet is a thread
 	return;
+}
+
+int connectToReceiver(struct sockaddr_in6* si_other, char* hostname, int port){
+	int sockFd;
+	bzero((char *)&si_other,sizeof(si_other));
+	si_other->sin6_port = htons((uint16_t)port);
+	si_other->sin6_family = AF_INET6;
+	printf("%d\n", port);
+	//fill the socket struxture and connect to other socket
+	return sockFd;
 }
 
 int main(int argc, char* argv[]){
 	int i;
     int interpreter=1;
-    void *fileToRead=NULL, *hostname=NULL, *port=NULL;
+    void *fileToRead=NULL, *hostname=NULL, *portPt=NULL;
+    uint16_t port;
     for (i=1; i<argc; i++){ // manager exceptions : si arc =1 ou argc >5 ou pas -f er argc>3 on exit : nbr d'aruments trop faible
         if(!strcmp(argv[i], "-f")){ //il faudra prendre en compte le "<"
             i=i+1;
@@ -35,61 +44,37 @@ int main(int argc, char* argv[]){
             interpreter=0;
         }else if(hostname==NULL){
             hostname=argv[i];
-        }else if(port==NULL){     
-            port=argv[i];
+        }else if(portPt==NULL){     
+            portPt=argv[i];
+            port = atoi((const char*)portPt);
         }
     }
 
-    printf("%s\n", hostname);
-    printf("%u\n", interpreter);
-    printf("%s\n", fileToRead);
+    //connection
+
+    struct sockaddr_in6 si_other;
+	bzero((char *)&si_other,sizeof(si_other));
+	si_other.sin6_port = htons(port);
+	si_other.sin6_family = AF_INET6;
+	if (inet_pton(AF_INET6,hostname , &si_other.sin6_addr) == 0){
+    	return 1; // error
+    }
+    int sockFd = socket(AF_INET6, SOCK_DGRAM, 0);
+    if (sockFd == -1){
+        return 2; // error
+    }
+    char *msg = "A string declared as a pointer.\n";
+    // bzero(msg, 10);
+    int  sizeToEncode = 20;
+    int sent = sendto(sockFd, msg, sizeToEncode,0,(struct sockaddr *) &si_other, sizeof(si_other));
+
+    fflush(stdin);
+
+	printf("%u\n", ntohs(si_other.sin6_port));
 
 
-	// char* fichier;
-	// char* host;
-	// int port_number = 0;
-	// int premier_argument = 0; //permet de savoir s'il s'agit du receiver ou du sender
-	// int symbole = 0;
-	// char* erreur;
-	// if(strcmp(argv[0], "./sender") == 0){
-	// 	premier_argument = 1;
-	// }else if(strcmp(argv[0], "./receiver") == 0){
-	// 	premier_argument = 2;
-	// }else{
-	// 	fprintf(stderr, "le premier argument n'est ni un sender, ni un receiver \n");
-	// 	return -1;
-	// }
 
-	// if(strcmp(argv[1], "-f")==0){// on sait donc qu'il s'agit du sender, et que celui ci specifie l'arg d'apres le nom du fichier
-	// 	fichier = argv[2];
-	// 	host = argv[3];
-	// 	port_number = atoi(argv[4]); 
-	// 	if(port_number == 0){
-	// 		fprintf(stderr, "option -f : probleme au numero du port \n");
-	// 		return -1;
-	// 	}
-	// }else{
-	// 	host = argv[1];
-	// 	port_number = atoi(argv[2]);
-	// 	if(port_number == 0){
-	// 		fprintf(stderr, "option sans -f : probleme au numero du port \n");
-	// 		return -1;
-	// 	}
-
-	// 	if(argv[3] == "<"){
-	// 		symbole = 1;
-	// 	}else if(argv[3] == ">"){
-	// 		symbole = 2;
-	// 	}else{
-	// 		fprintf(stderr, "option sans -f : probleme au symbole \n");
-	// 		return -1;
-	// 	}
-	// 	fichier  = argv[4];
-	// 	if(argc>5){
-	// 		erreur = argv[6];
-	// 	}
-	// }
-
+	
 
 	
 }
