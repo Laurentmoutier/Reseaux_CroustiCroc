@@ -24,11 +24,13 @@ struct __attribute__((__packed__)) pkt {
 	uint32_t crc2;
 };
 
+dans le pdf : numerotation des bits different!!
+
 /* Extra code */
 /* Your code will be inserted here */
 
 pkt_t* pkt_new(){
-	pkt_t* pkt_ptr = malloc(sizeof(struct pkt));
+	pkt_t* pkt_ptr = calloc(sizeof(struct pkt), 0);
 	return pkt_ptr;
 }
 	
