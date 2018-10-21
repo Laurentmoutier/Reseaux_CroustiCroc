@@ -15,7 +15,7 @@
 #include <poll.h>
 #include <sys/time.h>
 #include <math.h>
-#define MAXPKTSIZE 528
+#define MAXPAYSIZE 512
 #define MAXWIN 32
 #define TIMER 2100
 
@@ -31,17 +31,55 @@ void resend(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int i,
 	buf = malloc(len);
 	pkt_encode(pkt, buf, &len);
 	sendto(sockFd, buf, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
+	free(buf);
 	timeBuffer[i] = msTime;
 }
-void checkTimer(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int sockFd, struct sockaddr_in6 * si_other){
+int bufferIsFree(pkt_t ** waitingInBuffer){
+	for(int i = 0; i < MAXWIN; i++){
+		if(waitingInBuffer[i] != NULL){
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int checkTimer(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int sockFd, struct sockaddr_in6 * si_other){
+	int sent = 0;
 	for(int i = 0; i < MAXWIN; i++){
 		if(waitingInBuffer[i] != NULL){
 			if(timeBuffer[i] > msTime + TIMER){
 				resend(msTime, waitingInBuffer, timeBuffer, i, sockFd, si_other);
+				sent ++;
 			}
 		}
 	}
-	return;
+	return sent;
+}
+void fillPacket(pkt_t * pkt, char * fileBuffer, int len, int seq, int senderWin){
+	char * payload;
+	pkt_set_type(pkt, PTYPE_DATA);
+    pkt_set_length(pkt, len);
+    pkt_set_tr(pkt, 0);
+    pkt_set_seqnum(pkt, seq);
+    pkt_set_window(pkt, senderWin);
+
+	payload = fileBuffer;
+
+	// pkt
+	// fileBuffer += len;
+}
+void sendNextPaquet(char * fileBuffer, int * currentOffset, int fileMaxOffset, int sockFd,struct sockaddr_in6 * si_other, int seq, int senderWin){
+	int len = MAXPAYSIZE;
+	if(fileMaxOffset - *currentOffset < MAXPAYSIZE){
+		len = fileMaxOffset - *currentOffset;
+	}
+	if(fileMaxOffset - *currentOffset == 0){ //last paquet
+		len = 0;
+	}
+	pkt_t * pkt = pkt_new();
+	fillPacket(pkt, fileBuffer, len);
+	//PUT THIS PAQUET IN BUFFER + THE TIMESTAMP IN OTHER BUFFER
+	buf = fileBuffer
 }
 
 int main(int argc, char* argv[]){
@@ -68,8 +106,6 @@ int main(int argc, char* argv[]){
 	bzero((char *)&si_other,slen);
 	si_other.sin6_port = htons(port);
 	si_other.sin6_family = AF_INET6;
-
-
 	// if (inet_pton(AF_INET6,hostname , &si_other.sin6_addr) == 0){
  //    	return 1; // error
  //    }
@@ -87,6 +123,7 @@ int main(int argc, char* argv[]){
     rewind(fp);
     char * fileBuffer;
     fileBuffer = (char *)malloc((fileMaxOffset+1)*sizeof(char)); // si probleme: peut etre que fichier trop gros pr la memoire du pc
+    int currentOffset;
     uint8_t done = 0;
     struct pollfd pfds[1];
     int pollRet;
@@ -96,10 +133,24 @@ int main(int argc, char* argv[]){
     double timeBuffer[MAXWIN];
     struct timeval tv;
     double msTime;
+    int receiverWindow = 1;
+    int senderWin = 31;
+    int sent = 0;
+    int seqNum = 0;
     while(!done){
+    	sent = 0;
+    	//retransmissions
 	    gettimeofday(&tv, NULL);
 	    msTime = (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000 ;
-	    checkTimer(msTime, waitingInBuffer, timeBuffer, sockFd, &si_other);
+	    if(receiverWindow > 0){
+	    	sent = checkTimer(msTime, waitingInBuffer, timeBuffer, sockFd, &si_other);
+	    }
+	    //sending a new paquet
+	    if(receiverWindow-sent > 0){
+	    	if(bufferIsFree(waitingInBuffer) == 1){// if buffer full: cannot send (all previous sends are awaiting ack)
+	    		sendNextPaquet(fileBuffer, &currentOffset, fileMaxOffset, sockFd, &si_other, seqNum, senderWin);
+	    	}
+	    }
     	//poll: checking for ack (end of the loop)
     	pfds[0].fd = sockFd;
 	    pfds[0].events = POLLIN;
@@ -112,7 +163,7 @@ int main(int argc, char* argv[]){
     }
 	char *msg = "A string declared as a pointer.\n";
     int  sizeToEncode = 20;
-    int sent = sendto(sockFd, msg, sizeToEncode,0,(struct sockaddr *) &si_other, sizeof(si_other));
+    sendto(sockFd, msg, sizeToEncode,0,(struct sockaddr *) &si_other, sizeof(si_other));
 
 	
 }
