@@ -32,10 +32,10 @@ void addTobuffer(pkt_t ** waitingInBuffer, pkt_t * rcvdPkt){
 		}
 	}
 }
-int checkBuffer(pkt_t ** waitingInBuffer, uint8_t nextSeqNum, FILE * fp){
+int checkBuffer(pkt_t ** waitingInBuffer, uint8_t nextSeqnum, FILE * fp){
 	//checks the buffer for paquet that can be written in the file (if its seqNum is the next expected seqNum)
 	for(int i =0; i < MAXWIN; i++){
-		if(waitingInBuffer[i] != NULL && pkt_get_seqnum(waitingInBuffer[i]) == nextSeqNum){
+		if(waitingInBuffer[i] != NULL && pkt_get_seqnum(waitingInBuffer[i]) == nextSeqnum){
 			fwrite(pkt_get_payload(waitingInBuffer[i]),1,pkt_get_length(waitingInBuffer[i]),fp);
 			pkt_del(waitingInBuffer[i]);
 			waitingInBuffer[i] = NULL;
@@ -43,13 +43,43 @@ int checkBuffer(pkt_t ** waitingInBuffer, uint8_t nextSeqNum, FILE * fp){
 			if(nextSeqnum > 255){
 				nextSeqnum = 0;
 			}
-			nextSeqNum = checkBuffer(waitingInBuffer, nextSeqNum, fp);
+			nextSeqnum = checkBuffer(waitingInBuffer, nextSeqnum, fp);
 			return nextSeqnum;
 		}
 	}
 	return nextSeqnum;
 }
- mettre un int* pour ces 3 fonctions qui indique combien de places on a ds le buffer
+int getFreeSpace(pkt_t ** waitingInBuffer){
+	uint8_t freeSpace = 0;
+	for(int i =0; i < MAXWIN; i++){
+		if(waitingInBuffer[i] == NULL){
+			freeSpace++;
+		}
+	}
+	return freeSpace;
+}
+void sendAck(int sockFd, struct sockaddr_in6 * si_other, uint8_t nextSeqnum, uint8_t isAck, uint8_t window){
+	//building pkt
+	pkt_t * pkt = pkt_new();
+	pkt_status_code typeRet = pkt_set_type(pkt, PTYPE_ACK);
+	if (isAck == 0){
+		typeRet = pkt_set_type(pkt, PTYPE_NACK);
+	}
+	pkt_status_code trRet = pkt_set_tr(pkt, 0b0);
+	pkt_status_code winRet = pkt_set_window(pkt, window);
+	pkt_status_code seqRet = pkt_set_seqnum(pkt, nextSeqnum);
+	pkt_status_code lenRet = pkt_set_length(pkt, 0b0000000);
+	pkt_status_code timeRet = pkt_set_timestamp(pkt, 0b01111111111111111111111111111110); //todo timestamp
+	uint32_t crc1 = 0;
+	crc1 = crc32(crc1, (Bytef *)(pkt), sizeof(uint64_t));
+	pkt_status_code crc1Ret = pkt_set_crc1(pkt, crc1);
+	//encoding paquet and sending it
+	size_t len = 12;
+	char* buff = malloc(len*sizeof(char));
+	pkt_encode(pkt, buff, &len);
+    int sent = sendto(sockFd, buff, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
+	return;
+}
 
 void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
 	int receivedLastPaquet = 0;
@@ -64,6 +94,7 @@ void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
     if(fileToWrite!=NULL){
         fp = fopen(fileToWrite, "wa"); //was "wb"
     }
+    unsigned int lastAckSent = 0;
 	while(!receivedLastPaquet){
 		bzero(buf, MAXPKTSIZE);
 		rcvlen = recvfrom(sockFd, buf, MAXPKTSIZE, 0, (struct sockaddr *) &si_other, &slen);
@@ -73,21 +104,35 @@ void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
 		pkt_del(rcvdPkt);
 		rcvdPkt = pkt_new();
 		if(pkt_decode(buf, rcvlen, rcvdPkt) != PKT_OK){
-			cleanBuffer(waitingInBuffer, (uint8_t)pkt_get_seqnum(rcvdPkt));
-			if((uint8_t)pkt_get_seqnum(rcvdPkt) == nextSeqnum){ //le paquet qu on attendait
-				fwrite(pkt_get_payload(rcvdPkt),1,pkt_get_length(rcvdPkt),fp);
+			if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_tr(rcvdPkt) == 1){
+				//send NACK nextSeqnum est le seqnum du recu qui est tronque
+				sendAck(sockFd, si_other, pkt_get_seqnum(rcvdPkt), 0, getFreeSpace(waitingInBuffer));
+				lastAckSent = nextSeqnum;
 			}
 			else{
-				if((uint8_t)pkt_get_seqnum(rcvdPkt) > nextSeqnum){
-					addTobuffer(waitingInBuffer, rcvdPkt);
+				if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_length(rcvdPkt) == 0 && pkt_get_seqnum(rcvdPkt) == lastAckSent){
+					//send ACK + close connection
+					sendAck(sockFd, si_other, ++nextSeqnum%255, 1, getFreeSpace(waitingInBuffer));
+					receivedLastPaquet = 1;
 				}
-				//faut check le buffer et puis ack/nack
-				checkBuffer()
+				cleanBuffer(waitingInBuffer, (uint8_t)pkt_get_seqnum(rcvdPkt));
+				if((uint8_t)pkt_get_seqnum(rcvdPkt) == nextSeqnum){ //le paquet qu on attendait
+					fwrite(pkt_get_payload(rcvdPkt),1,pkt_get_length(rcvdPkt),fp);
+				}
+				else{ // pas le paquet attendu
+					if((uint8_t)pkt_get_seqnum(rcvdPkt) > nextSeqnum){ //il est pas encore traité: on le met en buffer
+						cleanBuffer(waitingInBuffer, (uint8_t)pkt_get_seqnum(rcvdPkt));
+						addTobuffer(waitingInBuffer, rcvdPkt);
+					}				
+				}
+				nextSeqnum = checkBuffer(waitingInBuffer, nextSeqnum, fp);
+				//send ACK (if window = 0 : don t send)
+				sendAck(sockFd, si_other, nextSeqnum, 1, getFreeSpace(waitingInBuffer));
+				lastAckSent = nextSeqnum;
 			}
-			//ecrire dans le fichier + envoyer ack/nack avec la bonne window
 		}
-		printf("received : %s\n", buf);
-		receivedLastPaquet = 1;
+		printf("received : %s\n", buf); //remove this
+		receivedLastPaquet = 1; //remove this
 	}
 	return;
 }
@@ -123,16 +168,7 @@ int main(int argc, char* argv[]){
 	}
 	fflush(stdout);
 	listenLoop(sockFd, &si_other, fileToWrite);
-	// struct pollfd fds[1];
-	// fds[0].fd =sockFd;
- //    fds[0].events = POLLIN | POLLPRI;
- //   	int ret = 0;
- //   	while(ret <=0){
- //   		ret = poll(fds, 1, 0);
- //   	}
-    
-    // if (ret > 0){int rcvlen = recvfrom(sockFd, buf, 1000, 0, (struct sockaddr *) &si_other, &slen);}
-    
+
 	shutdown(sockFd, 2);
 	return -1;
 }
