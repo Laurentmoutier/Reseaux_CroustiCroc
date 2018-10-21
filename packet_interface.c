@@ -80,12 +80,12 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 	uint32_t timestamp;
 	memcpy(&timestamp, data+4, sizeof(uint32_t));
 	/// timestamp = ntohl(timestamp);
-
-
 	
 	uint32_t crc1Received;
 	memcpy(&crc1Received, data+8, sizeof(uint32_t));
 	crc1Received = ntohl(crc1Received);	
+	pkt_set_crc1(pkt, crc1Received);
+
 	if (trFlag==1 && type!=PTYPE_DATA){
 		return E_TR;
 	}
@@ -107,28 +107,33 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 
 	/// uLong crc1Computed = crc32(0L, Z_NULL, 0);
 	uint32_t crc1Computed = 0;
-	crc1Computed = crc32(crc1Computed, (Bytef *)pkt, sizeof(uint64_t));
+	char dataNonTr[8];
+	memcpy(dataNonTr, data, sizeof(uint64_t));
+	dataNonTr[0] = dataNonTr[0] & 0b11011111;
+	crc1Computed = crc32(crc1Computed, (Bytef *)(&dataNonTr), sizeof(uint64_t));
+
+////	crc1Computed = crc32(crc1Computed, (Bytef *)pkt, sizeof(uint64_t));
 
 
 	pkt_set_tr(pkt, trFlag); // tr was 0 for crc
-	if (crc1Computed != ntohl(crc1Received)){
+	if (crc1Computed != crc1Received){
 		return E_CRC;
 	}
 
-	pkt_set_crc1(pkt, crc1Received);
-
-
 	if(length != 0){
+////	if(length*sizeof(char) == len-4*sizeof(uint32_t)){
 		if (len != 12 + (size_t)length + 4){
 			return E_LENGTH;
 		}
-		uint32_t crc2Received;
 
+		uint32_t crc2Received;
 		memcpy(&crc2Received, data+12+length, sizeof(uint32_t));
 		crc2Received = ntohl(crc2Received);
+
 		///uLong crc2Computed = crc32(0L, Z_NULL, 0);
+
 		uint32_t crc2Computed = 0;
-		crc2Computed = crc32(crc2Computed, (const Bytef *)data+12, length);
+		crc2Computed = crc32(crc2Computed, (Bytef *)data+12, length);
 		if (crc2Received != crc2Computed){
 			return E_CRC;
 		}
@@ -138,7 +143,9 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 		memcpy(payload, data+12, length);	
 		pkt_set_payload(pkt, payload, length);
 
-	}
+	}else{
+        pkt_set_crc2(pkt, 0);
+    }
 	return PKT_OK;
 }
 
@@ -160,8 +167,6 @@ pkt_status_code pkt_encode(const pkt_t* pkt, char *buf, size_t *len){
 	*header = *header & 0b11011111;
 	crc1 = crc32(crc1, (Bytef *)header, sizeof(uint64_t));
 	crc1 = htonl(crc1);
-	crc1 = pkt_get_crc1(pkt);
-	/// printf("AAAAA%u    %u\n", crc1, pkt_get_crc1(pkt));
 	memcpy(buf+copyLength+sizeof(uint32_t), &crc1, sizeof(uint32_t));
 	if(payLength == 0){ //no payload
 		return PKT_OK;
@@ -173,6 +178,7 @@ pkt_status_code pkt_encode(const pkt_t* pkt, char *buf, size_t *len){
 	crc2 = htonl(crc2);
 	memcpy(buf+copyLength+payLength + 2*sizeof(uint32_t), &crc2, sizeof(uint32_t));
 	// memcpy(buf + copyLength + payLength, &pkt->crc2, 4);
+	*len = sizeof(uint8_t)*2+sizeof(uint16_t)+3*sizeof(uint32_t)+payLength;
 	return PKT_OK;
 }
 
@@ -332,6 +338,7 @@ pkt_status_code pkt_set_payload(pkt_t *pkt,
 // 	printf("tr:%u\n",pkt_get_tr(paquet));
 // 	printf("window:%u\n",pkt_get_window(paquet));
 // 	printf("seqNum:%u\n",pkt_get_seqnum(paquet));
+// 	printf("length:%u\n",pkt_get_length(paquet));
 // 	printf("time:%u\n",pkt_get_timestamp(paquet));
 // 	printf("type:%u\n",pkt_get_type(paquet));
 
@@ -340,16 +347,12 @@ pkt_status_code pkt_set_payload(pkt_t *pkt,
 // 	strcpy(pay, "hello world");
 // 	int llen = strlen(pay);
 // 	pkt_set_payload(paquet, pay, llen);
-// 	printf("length:%u\n",pkt_get_length(paquet));
-// 	uint32_t crc1 = 0;
-// 	crc1 = crc32(crc1, (Bytef *)paquet, sizeof(uint64_t));
-
-// 	// uint32_t crc1Computed = 0;
-// 	// crc1Computed = crc32(crc1Computed, (Bytef *)pkt, sizeof(uint64_t));
+// 	uLong crc1 = crc32(0L, Z_NULL, 0);
+// 	crc1 = crc32(crc1, (const Bytef *)paquet, 8);
 
 // 	pkt_status_code crc1Ret = pkt_set_crc1(paquet, crc1);
 // 	printf("crc = %u\n", crc1);
-// 	uint32_t crc2 = 0;
+// 	uLong crc2 = crc32(0L, Z_NULL, 0);
 // 	crc2 = crc32(crc2, (const Bytef *)paquet->payload, llen);
 // 	pkt_status_code crc2Ret = pkt_set_crc2(paquet, crc2);
 // 	// printf("crc : %u %d", crc1, crc2);
@@ -377,7 +380,7 @@ pkt_status_code pkt_set_payload(pkt_t *pkt,
 // 	pkt_encode(paquet, buff, &len);
 // 	pkt_t* decPakt = pkt_new();
 // 	pkt_decode(buff, llen+16,decPakt);
-// 	printf("%u \n", pkt_get_crc1(decPakt));
+// 	printf("%u \n", pkt_get_timestamp(decPakt));
 // 	pkt_del(paquet);
 // 	pkt_del(decPakt);
 //    	return 0;
