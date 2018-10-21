@@ -15,7 +15,7 @@ void cleanBuffer(pkt_t ** waitingInBuffer, uint8_t toBeRemoved){
 	// if this paquet is in the buffer, it will be removed
 	for(int i =0; i < MAXWIN; i++){
 		if(waitingInBuffer[i] != NULL){
-			if(pkt_get_seqnum(waitingInBuffer[i]) <= toBeRemoved){
+			if(pkt_get_seqnum(waitingInBuffer[i]) == toBeRemoved){
 				pkt_del(waitingInBuffer[i]);
 				waitingInBuffer[i] = NULL;
 				return;
@@ -78,10 +78,12 @@ void sendAck(int sockFd, struct sockaddr_in6 * si_other, uint8_t nextSeqnum, uin
 	char* buff = malloc(len*sizeof(char));
 	pkt_encode(pkt, buff, &len);
     int sent = sendto(sockFd, buff, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
+    free(buff);
 	return;
 }
 
 void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
+	//il faudrait verifier que le paquet recu est bien dans notre window avant de mettre en buffer (pas seqnum = expected+200)
 	int receivedLastPaquet = 0;
 	char buf[MAXPKTSIZE];
 	int slen = sizeof(si_other);
@@ -92,12 +94,13 @@ void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
 	pkt_t * waitingInBuffer[MAXWIN] = {NULL};
 	uint8_t waiting = 0;
     if(fileToWrite!=NULL){
-        fp = fopen(fileToWrite, "wa"); //was "wb"
+        fp = fopen(fileToWrite, "wa"); //was "wb" pour binary essayer avec b
     }
     unsigned int lastAckSent = 0;
 	while(!receivedLastPaquet){
 		bzero(buf, MAXPKTSIZE);
-		rcvlen = recvfrom(sockFd, buf, MAXPKTSIZE, 0, (struct sockaddr *) &si_other, &slen);
+		rcvlen = recv(sockFd, buf, MAXPKTSIZE, 0);
+		printf("received something \n");
 		if (rcvlen == -1){
 				return;
 		}
@@ -142,6 +145,7 @@ int main(int argc, char* argv[]){
     int interpreter=1;
     void *fileToWrite=NULL, *hostname=NULL, *portPt=NULL;
     uint16_t port;
+    int slen;
     for (i=1; i<argc; i++){ // manager exceptions : si arc =1 ou argc >5 ou pas -f er argc>3 on exit : nbr d'aruments trop faible
         if(!strcmp(argv[i], "-f")){ //il faudra prendre en compte le "<"
             i=i+1;
@@ -160,15 +164,39 @@ int main(int argc, char* argv[]){
 	if( sockFd == -1){
 		return 1;
 	}
+	memset((char *) &si_me, 0, sizeof(si_me));
+
+	slen = sizeof(si_other);
 	si_me.sin6_family = AF_INET6;
 	si_me.sin6_port = htons(port);
 	si_me.sin6_addr = in6addr_any;
+
+	// si_other.sin6_port = htons(port);
+	// si_other.sin6_family = AF_INET6;
+
 	if(bind(sockFd, (struct sockaddr*)&si_me, sizeof(si_me)) == -1){
+		printf("bind failed\n");
 		return 2;
 	}
+
 	fflush(stdout);
+
+	// char *msg = "A string declared as a pointer.\n";
+ //    // bzero(msg, 10);
+ //    int  sizeToEncode = 12;
+ //    printf("going to send the paquet\n");
+ //    int sent = sendto(sockFd, msg, sizeToEncode,0,(struct sockaddr *) &si_other, sizeof(si_other));
+ //    printf("sent\n");
+	// char buf[1000];
+	// int rcvlen = recvfrom(sockFd, buf, 1000, 0, (struct sockaddr *) &si_other, &slen);
+	// printf("received\n");
+
 	listenLoop(sockFd, &si_other, fileToWrite);
 
-	shutdown(sockFd, 2);
+	// char *msg = "A string declared as a pointer.\n";
+ //    int  sizeToEncode = 20;
+ //    int sent = sendto(sockFd, msg, sizeToEncode,0,(struct sockaddr *) &si_other, sizeof(si_other));
+ //    printf("sent answer\n");
+	// shutdown(sockFd, 2);
 	return -1;
 }
