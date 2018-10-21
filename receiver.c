@@ -15,7 +15,7 @@ void cleanBuffer(pkt_t ** waitingInBuffer, uint8_t toBeRemoved){
 	// if this paquet is in the buffer, it will be removed
 	for(int i =0; i < MAXWIN; i++){
 		if(waitingInBuffer[i] != NULL){
-			if(pkt_get_seqnum(waitingInBuffer[i]) == toBeRemoved){
+			if(pkt_get_seqnum(waitingInBuffer[i]) <= toBeRemoved){
 				pkt_del(waitingInBuffer[i]);
 				waitingInBuffer[i] = NULL;
 				return;
@@ -24,6 +24,7 @@ void cleanBuffer(pkt_t ** waitingInBuffer, uint8_t toBeRemoved){
 	}
 }
 void addTobuffer(pkt_t ** waitingInBuffer, pkt_t * rcvdPkt){
+	//adds a packet in the buffer, if there is enough free space
 	for(int i =0; i < MAXWIN; i++){
 		if(waitingInBuffer[i] == NULL){
 			waitingInBuffer[i] = rcvdPkt;
@@ -31,18 +32,24 @@ void addTobuffer(pkt_t ** waitingInBuffer, pkt_t * rcvdPkt){
 		}
 	}
 }
-void checkBuffer(pkt_t ** waitingInBuffer, uint8_t nextSeqNum, FILE * fp){
+int checkBuffer(pkt_t ** waitingInBuffer, uint8_t nextSeqNum, FILE * fp){
+	//checks the buffer for paquet that can be written in the file (if its seqNum is the next expected seqNum)
 	for(int i =0; i < MAXWIN; i++){
 		if(waitingInBuffer[i] != NULL && pkt_get_seqnum(waitingInBuffer[i]) == nextSeqNum){
 			fwrite(pkt_get_payload(waitingInBuffer[i]),1,pkt_get_length(waitingInBuffer[i]),fp);
 			pkt_del(waitingInBuffer[i]);
 			waitingInBuffer[i] = NULL;
-			checkBuffer(waitingInBuffer, nextSeqNum+1, fp);
-			return;
+			nextSeqnum++;
+			if(nextSeqnum > 255){
+				nextSeqnum = 0;
+			}
+			nextSeqNum = checkBuffer(waitingInBuffer, nextSeqNum, fp);
+			return nextSeqnum;
 		}
 	}
+	return nextSeqnum;
 }
-
+ mettre un int* pour ces 3 fonctions qui indique combien de places on a ds le buffer
 
 void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
 	int receivedLastPaquet = 0;
@@ -75,7 +82,7 @@ void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
 					addTobuffer(waitingInBuffer, rcvdPkt);
 				}
 				//faut check le buffer et puis ack/nack
-
+				checkBuffer()
 			}
 			//ecrire dans le fichier + envoyer ack/nack avec la bonne window
 		}
@@ -104,7 +111,6 @@ int main(int argc, char* argv[]){
     }
     //connection
     struct sockaddr_in6 si_me, si_other;
-	// struct pollfd fds[1];
 	int sockFd = socket(AF_INET6, SOCK_DGRAM, 0);
 	if( sockFd == -1){
 		return 1;
@@ -117,6 +123,7 @@ int main(int argc, char* argv[]){
 	}
 	fflush(stdout);
 	listenLoop(sockFd, &si_other, fileToWrite);
+	// struct pollfd fds[1];
 	// fds[0].fd =sockFd;
  //    fds[0].events = POLLIN | POLLPRI;
  //   	int ret = 0;
