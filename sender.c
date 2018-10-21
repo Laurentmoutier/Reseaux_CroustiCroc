@@ -1,4 +1,6 @@
 #include "packet_interface.h"
+#include "packet_interface.c"
+
 
 #include <stddef.h> /* size_t */
 #include <stdint.h> /* uintx_t */
@@ -51,7 +53,6 @@ int main(int argc, char* argv[]){
     }
 
     //connection
-
     struct sockaddr_in6 si_other;
 	bzero((char *)&si_other,sizeof(si_other));
 	si_other.sin6_port = htons(port);
