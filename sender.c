@@ -33,17 +33,17 @@ void resend(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int i,
 	sendto(sockFd, buf, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
 	free(buf);
 	timeBuffer[i] = msTime;
+
 }
 int bufferIsFree(pkt_t ** waitingInBuffer){
 	for(int i = 0; i < MAXWIN; i++){
-		if(waitingInBuffer[i] != NULL){
+		if(waitingInBuffer[i] == NULL){
 			return 1;
 		}
 	}
 	return 0;
 }
-
-int checkTimer(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int sockFd, struct sockaddr_in6 * si_other){
+int checkTimer(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int* fileProgressionBuffer, int sockFd, struct sockaddr_in6 * si_other){
 	int sent = 0;
 	for(int i = 0; i < MAXWIN; i++){
 		if(waitingInBuffer[i] != NULL){
@@ -55,39 +55,82 @@ int checkTimer(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int
 	}
 	return sent;
 }
-void fillPacket(pkt_t * pkt, char * fileBuffer, int len, int seq, int senderWin){
+void fillPacket(pkt_t * pkt, char * fileBuffer, uint16_t len, uint8_t seq, int senderWin){
 	char * payload;
 	pkt_set_type(pkt, PTYPE_DATA);
     pkt_set_length(pkt, len);
     pkt_set_tr(pkt, 0);
     pkt_set_seqnum(pkt, seq);
     pkt_set_window(pkt, senderWin);
-
+    pkt_set_timestamp(pkt, 0);
+	uint32_t crc = 0;
+    crc = crc32(crc, (Bytef *)(pkt), sizeof(uint64_t));
+    pkt_set_crc1(pkt, crc);
 	payload = fileBuffer;
-
-	// pkt
-	// fileBuffer += len;
+	pkt_set_payload(pkt, payload, len);
+	crc = 0;
+    crc = crc32(crc, (Bytef *)(pkt->payload), len);
+    pkt_set_crc2(pkt, crc);
+    fileBuffer += len; //points to next place in the fileBuffer where the next paquet will carry on
 }
-void sendNextPaquet(char * fileBuffer, int * currentOffset, int fileMaxOffset, int sockFd,struct sockaddr_in6 * si_other, int seq, int senderWin){
-	int len = MAXPAYSIZE;
+void addToBuffer(pkt_t ** waitingInBuffer, double * timeBuffer, int* fileProgressionBuffer, int* currentOffset, pkt_t * pkt, double* msTime){
+	for(int i = 0; i < MAXWIN; i++){
+		if(waitingInBuffer[i] == NULL){
+			waitingInBuffer[i] = pkt;
+			timeBuffer[i] = *msTime;
+			fileProgressionBuffer[i] = *currentOffset;
+			return;
+		}
+	}
+}
+int nextPktLen( int * currentOffset, int fileMaxOffset){
+	size_t len = MAXPAYSIZE;
 	if(fileMaxOffset - *currentOffset < MAXPAYSIZE){
 		len = fileMaxOffset - *currentOffset;
 	}
 	if(fileMaxOffset - *currentOffset == 0){ //last paquet
 		len = 0;
 	}
-	pkt_t * pkt = pkt_new();
-	fillPacket(pkt, fileBuffer, len);
-	//PUT THIS PAQUET IN BUFFER + THE TIMESTAMP IN OTHER BUFFER
-	buf = fileBuffer
+	return len;
 }
-
+void manageThisAck(char * decbuf, uint8_t * lastAck, unsigned int * receiverWindow, int len){
+	pkt_t * pkt = pkt_new();
+	pkt_decode(decbuf, len, pkt);
+	*receiverWindow = pkt_get_window(pkt);
+	if (*lastAck != pkt_get_seqnum(pkt)){
+		*lastAck = pkt_get_seqnum(pkt);
+	}
+}
+void tryEmptyingBuffer(pkt_t ** waitingInBuffer, double * timeBuffer, int* fileProgressionBuffer, uint8_t lastAck){
+	int fileProgressionAcked = 0;
+	for(int i=0; i < MAXWIN; i++){
+		if(waitingInBuffer[i] != NULL && pkt_get_seqnum(waitingInBuffer[i])==lastAck){
+			fileProgressionAcked = fileProgressionBuffer[i];
+		}
+	}
+	for(int u=0; u<MAXWIN; u++){
+		if(fileProgressionBuffer[u] != -1 && fileProgressionBuffer[u] <= fileProgressionAcked && waitingInBuffer[u]!=NULL){//then delete these paquets from buffer
+			fileProgressionBuffer[u] = -1;
+			timeBuffer[u] = -1;
+			pkt_del(waitingInBuffer[u]);
+			waitingInBuffer[u] = NULL;
+		}
+	}
+}
+int bufferEmpty(pkt_t ** waitingInBuffer){
+	for(int i =0; i< MAXWIN; i++){
+		if(waitingInBuffer != NULL){
+			return 0;
+		}
+	}
+	return 1;
+}
 int main(int argc, char* argv[]){
 	int i;
     int interpreter=1;
     void *fileToRead=NULL, *hostname=NULL, *portPt=NULL;
     uint16_t port;
-    for (i=1; i<argc; i++){ // manager exceptions : si arc =1 ou argc >5 ou pas -f er argc>3 on exit : nbr d'aruments trop faible
+    for (i=1; i<argc; i++){ // manager exceptions : si argc =1 ou argc >5 ou pas -f et argc>3 on exit : nbr d'aruments trop faible
         if(!strcmp(argv[i], "-f")){ //il faudra prendre en compte le "<"
             i=i+1;
             fileToRead=argv[i];
@@ -99,8 +142,6 @@ int main(int argc, char* argv[]){
             port = atoi((const char*)portPt);
         }
     }
-
-    //connection
     struct sockaddr_in6 si_other;
     int slen = sizeof(si_other);
 	bzero((char *)&si_other,slen);
@@ -123,47 +164,90 @@ int main(int argc, char* argv[]){
     rewind(fp);
     char * fileBuffer;
     fileBuffer = (char *)malloc((fileMaxOffset+1)*sizeof(char)); // si probleme: peut etre que fichier trop gros pr la memoire du pc
-    int currentOffset;
+    int currentOffset = 0;
     uint8_t done = 0;
     struct pollfd pfds[1];
     int pollRet;
     unsigned int rcvlen;
     char decbuf[12];
-    pkt_t * waitingInBuffer[MAXWIN] = {NULL};
+    pkt_t * waitingInBuffer[MAXWIN];
     double timeBuffer[MAXWIN];
+    int fileProgressionBuffer[MAXWIN];
+    for(int i = 0; i<MAXWIN; i++){ //init arrays
+    	waitingInBuffer[i] = NULL;
+    	timeBuffer[i] = -1;
+    	fileProgressionBuffer[i] = -1;
+    }	
     struct timeval tv;
     double msTime;
-    int receiverWindow = 1;
-    int senderWin = 31;
+   	unsigned int receiverWindow = 1;
+    unsigned int senderWin = 31;
     int sent = 0;
-    int seqNum = 0;
+    uint8_t seqNum = 0;
+    uint8_t lastAck = 31;
+    char * buf;
+    size_t sendLen = 0;
     while(!done){
+    	//check retransmission timers and retransmit
     	sent = 0;
-    	//retransmissions
 	    gettimeofday(&tv, NULL);
 	    msTime = (tv.tv_sec) * 1000 + (tv.tv_usec) / 1000 ;
 	    if(receiverWindow > 0){
-	    	sent = checkTimer(msTime, waitingInBuffer, timeBuffer, sockFd, &si_other);
-	    }
-	    //sending a new paquet
-	    if(receiverWindow-sent > 0){
-	    	if(bufferIsFree(waitingInBuffer) == 1){// if buffer full: cannot send (all previous sends are awaiting ack)
-	    		sendNextPaquet(fileBuffer, &currentOffset, fileMaxOffset, sockFd, &si_other, seqNum, senderWin);
+	    	// sent = checkTimer(msTime, waitingInBuffer,  timeBuffer,fileProgressionBuffer, sockFd, &si_other);
+	    	for(int i = 0; i < MAXWIN; i++){
+	    		if(waitingInBuffer[i] != NULL){
+	    			if(timeBuffer[i] > msTime + TIMER){
+	    				//resend:
+	    				pkt_t * paquet = waitingInBuffer[i];
+	    				char * buff;
+	    				size_t len;
+	    				if(pkt_get_length(paquet) == 0){
+	    					len = 12;
+	    				}else{
+	    					len = pkt_get_length(paquet) + 16;
+	    				}
+	    				buff = malloc(len);
+	    				pkt_encode(paquet, buff, &len);
+	    				sendto(sockFd, buff, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
+	    				free(buff);
+	    				timeBuffer[i] = msTime;
+	    				// resend(msTime, waitingInBuffer, timeBuffer, i, sockFd, si_other);
+	    				sent ++;
+	    			}
+	    		}
 	    	}
 	    }
-    	//poll: checking for ack (end of the loop)
+	    if(receiverWindow-sent > 0){
+	    	//sending a new paquet
+	    	if(bufferIsFree(waitingInBuffer) == 1){// if buffer full: cannot send (all previous sends are awaiting ack)
+	    		sendLen = nextPktLen(&currentOffset, fileMaxOffset);
+				buf = malloc(sendLen);
+				pkt_t * pkt = pkt_new();
+				fillPacket(pkt, fileBuffer, sendLen,seqNum,  senderWin);
+				pkt_encode(pkt, buf, &sendLen);
+				sendto(sockFd, buf, sendLen,0,(struct sockaddr *) &si_other, sizeof(si_other));
+				addToBuffer(waitingInBuffer, timeBuffer, fileProgressionBuffer, &currentOffset, pkt, &msTime);
+				currentOffset = currentOffset + sendLen;
+	    		free(buf);
+	    	}
+	    }
+    	// poll: checking for ack (end of the loop)
     	pfds[0].fd = sockFd;
 	    pfds[0].events = POLLIN;
 	    pollRet = poll(pfds, 1, 1);
 	    if(pollRet >0){ //received an ack
 	    	printf("received an ack\n");
-	    	// char decbuf[12];
+	    	char decbuf[12];
             rcvlen = recvfrom(sockFd, decbuf, 12, 0, (struct sockaddr *) &si_other, &slen);
+            manageThisAck(decbuf, &lastAck, &receiverWindow, rcvlen);
+            printf("%d\n", receiverWindow);
 	    }
+	    tryEmptyingBuffer(waitingInBuffer, timeBuffer, fileProgressionBuffer, lastAck);
+	    if(bufferEmpty(waitingInBuffer) == 1){
+	    	done = 1;
+	    }
+	    // done = 1;
     }
-	char *msg = "A string declared as a pointer.\n";
-    int  sizeToEncode = 20;
-    sendto(sockFd, msg, sizeToEncode,0,(struct sockaddr *) &si_other, sizeof(si_other));
 
-	
+
 }

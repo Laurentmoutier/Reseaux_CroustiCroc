@@ -100,7 +100,6 @@ void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
 	while(!receivedLastPaquet){
 		bzero(buf, MAXPKTSIZE);
 		rcvlen = recv(sockFd, buf, MAXPKTSIZE, 0);
-		printf("received something \n");
 		if (rcvlen == -1){
 				return;
 		}
@@ -110,12 +109,15 @@ void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
 			if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_tr(rcvdPkt) == 1){
 				//send NACK nextSeqnum est le seqnum du recu qui est tronque
 				sendAck(sockFd, si_other, pkt_get_seqnum(rcvdPkt), 0, getFreeSpace(waitingInBuffer));
+				printf("NACK SENT\n");
 				lastAckSent = nextSeqnum;
 			}
 			else{
 				if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_length(rcvdPkt) == 0 && pkt_get_seqnum(rcvdPkt) == lastAckSent){
 					//send ACK + close connection
 					sendAck(sockFd, si_other, ++nextSeqnum%255, 1, getFreeSpace(waitingInBuffer));
+					printf("ACK SENT\n");
+
 					receivedLastPaquet = 1;
 				}
 				cleanBuffer(waitingInBuffer, (uint8_t)pkt_get_seqnum(rcvdPkt));
@@ -131,11 +133,12 @@ void listenLoop(int sockFd, struct sockaddr_in6 * si_other, void * fileToWrite){
 				nextSeqnum = checkBuffer(waitingInBuffer, nextSeqnum, fp);
 				//send ACK (if window = 0 : don t send)
 				sendAck(sockFd, si_other, nextSeqnum, 1, getFreeSpace(waitingInBuffer));
+				printf("ACK SENT\n");
+
 				lastAckSent = nextSeqnum;
 			}
 		}
-		printf("received : %s\n", buf); //remove this
-		receivedLastPaquet = 1; //remove this
+		// receivedLastPaquet = 1; //remove this
 	}
 	return;
 }
@@ -181,22 +184,64 @@ int main(int argc, char* argv[]){
 
 	fflush(stdout);
 
-	// char *msg = "A string declared as a pointer.\n";
- //    // bzero(msg, 10);
- //    int  sizeToEncode = 12;
- //    printf("going to send the paquet\n");
- //    int sent = sendto(sockFd, msg, sizeToEncode,0,(struct sockaddr *) &si_other, sizeof(si_other));
- //    printf("sent\n");
-	// char buf[1000];
-	// int rcvlen = recvfrom(sockFd, buf, 1000, 0, (struct sockaddr *) &si_other, &slen);
-	// printf("received\n");
+	int receivedLastPaquet = 0;
+	char buf[MAXPKTSIZE];
+	int rcvlen = 0;
+    uint8_t nextSeqnum = 0;
+	pkt_t * rcvdPkt = pkt_new();
+	FILE * fp;
+	pkt_t * waitingInBuffer[MAXWIN] = {NULL};
+	uint8_t waiting = 0;
+    if(fileToWrite!=NULL){
+        fp = fopen(fileToWrite, "wa"); //was "wb" pour binary essayer avec b
+    }
+    unsigned int lastAckSent = 0;
+	while(!receivedLastPaquet){
+		bzero(buf, MAXPKTSIZE);
+		rcvlen = recv(sockFd, buf, MAXPKTSIZE, 0);
+		if (rcvlen == -1){
+				return 1;
+		}
+		pkt_del(rcvdPkt);
+		rcvdPkt = pkt_new();
+		if(pkt_decode(buf, rcvlen, rcvdPkt) != PKT_OK){
+			if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_tr(rcvdPkt) == 1){
+				//send NACK nextSeqnum est le seqnum du recu qui est tronque
+				sendAck(sockFd, &si_other, pkt_get_seqnum(rcvdPkt), 0, getFreeSpace(waitingInBuffer));
+				printf("NACK SENT\n");
+				lastAckSent = nextSeqnum;
+			}
+			else{
+				if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_length(rcvdPkt) == 0 && pkt_get_seqnum(rcvdPkt) == lastAckSent){
+					//send ACK + close connection
+					sendAck(sockFd, &si_other, ++nextSeqnum%255, 1, getFreeSpace(waitingInBuffer));
+					printf("ACK SENT\n");
 
-	listenLoop(sockFd, &si_other, fileToWrite);
+					receivedLastPaquet = 1;
+				}
+				cleanBuffer(waitingInBuffer, (uint8_t)pkt_get_seqnum(rcvdPkt));
+				if((uint8_t)pkt_get_seqnum(rcvdPkt) == nextSeqnum){ //le paquet qu on attendait
+					fwrite(pkt_get_payload(rcvdPkt),1,pkt_get_length(rcvdPkt),fp);
+				}
+				else{ // pas le paquet attendu
+					if((uint8_t)pkt_get_seqnum(rcvdPkt) > nextSeqnum){ //il est pas encore traité: on le met en buffer
+						cleanBuffer(waitingInBuffer, (uint8_t)pkt_get_seqnum(rcvdPkt));
+						addTobuffer(waitingInBuffer, rcvdPkt);
+					}				
+				}
+				nextSeqnum = checkBuffer(waitingInBuffer, nextSeqnum, fp);
+				//send ACK (if window = 0 : don t send)
+				sendAck(sockFd, &si_other, nextSeqnum, 1, getFreeSpace(waitingInBuffer));
+				printf("ACK SENT\n");
 
-	// char *msg = "A string declared as a pointer.\n";
- //    int  sizeToEncode = 20;
- //    int sent = sendto(sockFd, msg, sizeToEncode,0,(struct sockaddr *) &si_other, sizeof(si_other));
- //    printf("sent answer\n");
-	// shutdown(sockFd, 2);
+				lastAckSent = nextSeqnum;
+			}
+		}
+		// receivedLastPaquet = 1; //remove this
+	}
+
+	// listenLoop(sockFd, &si_other, fileToWrite);
+
+	shutdown(sockFd, 2);
 	return -1;
 }
