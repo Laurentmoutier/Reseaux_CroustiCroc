@@ -86,6 +86,18 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 	crc1Received = ntohl(crc1Received);	
 	pkt_set_crc1(pkt, crc1Received);
 
+	// printf("decode type   :%u\n", type);
+	// printf("decode tr     :%u\n", trFlag);
+	// printf("decode window :%u\n", window);
+	// printf("decode seqnum :%u\n", seqNum);
+	// printf("decode length :%u\n", length);
+	// printf("decode time   :%u\n", timestamp);
+	// printf("decode crc    :%u\n", crc1Received);
+
+
+
+
+
 	if (trFlag==1 && type!=PTYPE_DATA){
 		return E_TR;
 	}
@@ -152,6 +164,9 @@ pkt_status_code pkt_decode(const char *data, const size_t len, pkt_t *pkt){
 pkt_status_code pkt_encode(const pkt_t* pkt, char *buf, size_t *len){
 	int payLength = pkt_get_length(pkt);
 	size_t totalSize = sizeof(pkt_t) + payLength - sizeof(char*);
+	if(payLength == 0){
+		totalSize = totalSize - sizeof(uint32_t); //no crc2
+	}
 	if(totalSize > *len){ //buffer trop petit
 		return E_NOMEM;
 	}
@@ -371,8 +386,8 @@ pkt_status_code pkt_set_payload(pkt_t *pkt,
 // 	// printf("get seqNum: %u\n", seqNum);
 // 	// printf("get length: %u\n", length);
 // 	// printf("get timestamp: %u\n", timestamp);
-// 	printf("get crc1: %u\n", crcGet);
-// 	// printf("payload : %s\n", payload);
+// 	// printf("get crc1: %u\n", crcGet);
+// 	// printf("payload : %s\n",  pkt_get_payload(paquet));
 
 // 	// printf("\n");
 // 	size_t len = llen+16;
