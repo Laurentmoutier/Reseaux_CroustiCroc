@@ -35,11 +35,9 @@ void resend(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int i,
 	sendto(sockFd, buf, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
 	free(buf);
 	timeBuffer[i] = msTime;
-	// printf("(resend)%u\n", pkt_get_seqnum(pkt));
 }
 
 void sendPaquet(pkt_t * pkt, int sockFd, struct sockaddr_in6 si_other){
-	// printf("%u\n", pkt_get_seqnum(pkt));
 	int payLength = pkt_get_length(pkt);
 	size_t totalSize = sizeof(pkt_t) + payLength - sizeof(char*);
 	char * buf;
@@ -73,7 +71,6 @@ int checkTimer(uint8_t * presentInBuffer ,double msTime, pkt_t ** waitingInBuffe
 			sent ++;
 			if(timeBuffer[i] + TIMER < msTime ){
 				resend(msTime, waitingInBuffer, timeBuffer, i, sockFd, si_other);
-				// fprintf(stderr, "resending from buffer, timer expired\n");
 			}
 		}
 	}
@@ -89,19 +86,14 @@ void fillPacket(pkt_t * pkt, char * buf, uint16_t len, uint8_t seq, int senderWi
 	uint32_t crc = 0;
     crc = crc32(crc, (Bytef *)(pkt), sizeof(uint64_t));
     pkt_set_crc1(pkt, crc);
-    if(buf[len] == EOF){
-    	printf("END OF FILE\n");
-    }
     if(len!=0){
 		char * pay = calloc(len, sizeof(char));
 		memcpy(pay, buf, len);
-		pay[len] = '\0';
+		// pay[len] = '\0';
 		pkt_set_payload(pkt, pay, len);
 		crc = 0;
 	    crc = crc32(crc, (Bytef *)(pkt->payload), len);
 	    pkt_set_crc2(pkt, crc);
-  //   	printf("\nstrlen(buf): %d   strlen(pay): %d    strlen(pkt_get_payload(pkt)): %d\n\n", strlen(buf), strlen(pay), strlen(pkt_get_payload(pkt)));
-		// printf("%s\n", pkt_get_payload(pkt));
 	    free(pay);
 	}
 
@@ -126,7 +118,6 @@ int nextPktLen( int * currentOffset, int fileMaxOffset){
 	if(fileMaxOffset - *currentOffset <= 0){ //last paquet
 		len = 0;
 	}
-	// printf("%u\n", len);
 	return len;
 }
 
@@ -134,7 +125,6 @@ void manageThisAck(char * decbuf, uint8_t * lastAck, unsigned int * receiverWind
 	pkt_t * pkt = pkt_new();
 	pkt_status_code pktDec = pkt_decode(decbuf, len, pkt);
 	*receiverWindow = pkt_get_window(pkt); //VRIFIER TYPE NACK OU ACK
-	// printf("%u <<<= window  (status code = %u)\n",  pkt_get_window(pkt), pktDec);
 	if (*lastAck != pkt_get_seqnum(pkt)){
 		*lastAck = pkt_get_seqnum(pkt);
 	}
@@ -197,35 +187,16 @@ int main(int argc, char* argv[]){
     int readBytes = 0;
     if(interpreter==0){
     	ffp = fopen(fileToRead, "rb");
-    	fseek(ffp, 0, SEEK_END);
-    	fileMaxOffset= ftell(ffp); // gets the end of the file
-    	rewind(ffp);
-    	fileBuffer = (char *)malloc((fileMaxOffset+1)*sizeof(char));
-    	fread(fileBuffer, fileMaxOffset, 1, ffp);
-    	readBytes = fileMaxOffset;
-    	// printf("%s", fileBuffer);
     } 
-    else{
-    	char * tmpBuff;
-    	int iterSize = 4*sizeof(char);
-    	int bufferSize = iterSize;
-    	int minus = 0;
-    	char tmp[iterSize];
-    	fileBuffer = malloc(iterSize*sizeof(char) + 1);
-    	while(fgets(tmp, iterSize, ffp)){
-    		if(readBytes >= bufferSize){
-    			bufferSize = (bufferSize-1)*2*sizeof(char) +1;
-    			tmpBuff = malloc(bufferSize);
-    			memcpy(tmpBuff, fileBuffer, readBytes);
-    			free(fileBuffer);
-    			fileBuffer = tmpBuff;
-    		}
-    		memcpy(fileBuffer+readBytes, tmp, strlen(tmp));
-    		readBytes += strlen(tmp);
-    	}
-    	fileMaxOffset = readBytes;
-    }
+	fseek(ffp, 0, SEEK_END);
+	fileMaxOffset= ftell(ffp); // gets the end of the file
+	rewind(ffp);
+	fileBuffer = (char *)malloc((fileMaxOffset+1)*sizeof(char));
+	fread(fileBuffer, fileMaxOffset, 1, ffp);
+	readBytes = fileMaxOffset;
     fileBuffer[readBytes] = EOF;
+
+    //connection
     struct sockaddr_in6 si_other;
     int slen = sizeof(si_other);
 	bzero((char *)&si_other,slen);
@@ -279,7 +250,6 @@ int main(int argc, char* argv[]){
 				pkt_t * pkt = pkt_new();
 	    		sendLen = nextPktLen(&currentOffset, fileMaxOffset); //get the payload length (512 until we reach the end)
 	    		if(sendLen == 0){ // the last paquet (no payload)
-	    			printf("SENT LAST PAQUET (%u)\n", seqNum);
 	    			allSent += 10;
 	    			seqNum = lastAck; //for the last paquet
 	    			fillPacket(pkt, buf, sendLen, seqNum, senderWin);
@@ -328,9 +298,6 @@ int main(int argc, char* argv[]){
             manageThisAck(decbuf, &lastAck, &receiverWindow, rcvlen);
 	    }
 	    tryEmptyingBuffer(presentInBuffer, waitingInBuffer, timeBuffer, fileProgressionBuffer, lastAck);
-	    // if(bufferEmpty(presentInBuffer) == 1 && allSent>10){
-	    // 	done = 1;
-	    // }
     }
 
 
