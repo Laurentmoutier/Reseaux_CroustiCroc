@@ -155,8 +155,9 @@ int main(int argc, char* argv[]){
         fp = fopen(fileToWrite, "wa"); //was "wb" pour binary essayer avec b
     }
     unsigned int lastAckSent = 0;
+    int wasWrong = 0;
 	while(!receivedLastPaquet){
-		// testRecv(sockFd, si_me, si_other, slen);
+		int wrong = 0;
 		rcvlen = recvfrom(sockFd, buf, MAXPKTSIZE, 0, (struct sockaddr *) &si_other, &slen);
 		if (rcvlen == -1){
 				return 1;
@@ -164,26 +165,23 @@ int main(int argc, char* argv[]){
 		pkt_del(rcvdPkt);
 		rcvdPkt = pkt_new();
 		int decRet = pkt_decode(buf, rcvlen, rcvdPkt);
-		// printf("%d is the type received\n",pkt_get_type(rcvdPkt) );
 		if(decRet == PKT_OK){
 			if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_tr(rcvdPkt) == 1){
-				//send NACK nextSeqnum est le seqnum du recu qui est tronque
+				//send NACK nextSeqnum est le seqnum du pkt recu qui est tronque
 				sendAck(sockFd, si_other, pkt_get_seqnum(rcvdPkt), 0, getFreeSpace(presentInBuffer, waitingInBuffer));
 				lastAckSent = nextSeqnum;
 			}
 			else{ 
 				if((uint8_t)pkt_get_seqnum(rcvdPkt) != nextSeqnum){
-					printf("WRONG SEQNUM received: %u    expected: %u\n", (uint8_t)pkt_get_seqnum(rcvdPkt), nextSeqnum);
-					// WRONG SEQNUM received: 62    expected: 64
+					printf("\nWRONG SEQNUM received: %u    expected: %u\n", (uint8_t)pkt_get_seqnum(rcvdPkt), nextSeqnum);
+					wrong = 1;
+					wasWrong = 1;
 				}
-				// fprintf(stderr, "received seqnum : %u\n", (uint8_t)pkt_get_seqnum(rcvdPkt));
-				// fprintf(stderr, "expected seqnum : %u\n", nextSeqnum);
 				if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_length(rcvdPkt) == 0 && pkt_get_seqnum(rcvdPkt) == lastAckSent){
 					//send ACK + close connection
 					sendAck(sockFd, si_other, ++nextSeqnum%255, 1, getFreeSpace(presentInBuffer, waitingInBuffer));
-					// printf("ENDING CONNECTION (last paquet received)\n");
-					//finir la connection que si on a des unacked
 					receivedLastPaquet = 1;
+					printf("LAST ACK RECEIVED (%u)\n", pkt_get_seqnum(rcvdPkt));
 				}
 				cleanBuffer(presentInBuffer, waitingInBuffer, (uint8_t)pkt_get_seqnum(rcvdPkt));
 				if((uint8_t)pkt_get_seqnum(rcvdPkt) == nextSeqnum){ //le paquet qu on attendait
@@ -198,18 +196,29 @@ int main(int argc, char* argv[]){
 					}
 				}
 				else{ // pas le paquet attendu
-					if((uint8_t)pkt_get_seqnum(rcvdPkt) > nextSeqnum){ //il est pas encore traité: on le met en buffer
+					if((uint8_t)pkt_get_seqnum(rcvdPkt) > nextSeqnum || (uint8_t)pkt_get_seqnum(rcvdPkt) < ((nextSeqnum+31)%255)){
 						cleanBuffer(presentInBuffer, waitingInBuffer, (uint8_t)pkt_get_seqnum(rcvdPkt));
 						addTobuffer(presentInBuffer, waitingInBuffer, rcvdPkt);
-					}				
+					}
 				}
 				nextSeqnum = checkBuffer(presentInBuffer, waitingInBuffer, nextSeqnum, fp, interpreter);
-				//send ACK (if window = 0 : don t send)
+				
 				int freeSpace = getFreeSpace(presentInBuffer, waitingInBuffer);
-				// printf("free space : %d\n", freeSpace);
 				sendAck(sockFd, si_other, nextSeqnum, 1, freeSpace);
 				// printf("ACK SENT\n");
 				lastAckSent = nextSeqnum;
+				if(wrong == 1){
+					printf("nextSeqnum: %u\n",nextSeqnum );
+					printf("free space : %d\n", freeSpace);
+					for(int h =0; h<31; h++){
+						if(presentInBuffer[h] == 1){
+							printf("seqnum of waiting in buffer: %u\n", pkt_get_seqnum(waitingInBuffer[h]));
+						}
+					}
+				}
+				if(wasWrong == 1){
+					printf("seqnum received : %u\n",(uint8_t)pkt_get_seqnum(rcvdPkt));
+				}
 			}
 		}
 		else{

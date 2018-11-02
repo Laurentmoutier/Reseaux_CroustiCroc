@@ -35,9 +35,11 @@ void resend(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int i,
 	sendto(sockFd, buf, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
 	free(buf);
 	timeBuffer[i] = msTime;
+	// printf("(resend)%u\n", pkt_get_seqnum(pkt));
 }
 
 void sendPaquet(pkt_t * pkt, int sockFd, struct sockaddr_in6 si_other){
+	// printf("%u\n", pkt_get_seqnum(pkt));
 	int payLength = pkt_get_length(pkt);
 	size_t totalSize = sizeof(pkt_t) + payLength - sizeof(char*);
 	char * buf;
@@ -91,17 +93,9 @@ void fillPacket(pkt_t * pkt, char * buf, uint16_t len, uint8_t seq, int senderWi
     	printf("END OF FILE\n");
     }
     if(len!=0){
-		// printf("\n\nlen:  %d     \n%s\n", len,  buf);
 		char * pay = calloc(len, sizeof(char));
-		// char pay[len*sizeof(char)] = {'\0'};
 		memcpy(pay, buf, len);
-		// printf("\n%s\n", pay);
-		// printf("\n%c\n", pay[len]);
-		
-
-
 		pay[len] = '\0';
-
 		pkt_set_payload(pkt, pay, len);
 		crc = 0;
 	    crc = crc32(crc, (Bytef *)(pkt->payload), len);
@@ -283,44 +277,48 @@ int main(int argc, char* argv[]){
 	    	if(bufferIsFree(presentInBuffer) == 1){// if buffer full: cannot send (all previous sends are awaiting ack)
 	    		//make paquet
 				pkt_t * pkt = pkt_new();
-	    		sendLen = nextPktLen(&currentOffset, fileMaxOffset); //payload length
-	    		if(sendLen == 0){
-	    			allSent = 1;
+	    		sendLen = nextPktLen(&currentOffset, fileMaxOffset); //get the payload length (512 until we reach the end)
+	    		if(sendLen == 0){ // the last paquet (no payload)
+	    			printf("SENT LAST PAQUET (%u)\n", seqNum);
+	    			allSent += 10;
 	    			seqNum = lastAck; //for the last paquet
 	    			fillPacket(pkt, buf, sendLen, seqNum, senderWin);
+	    			sendPaquet(pkt, sockFd, si_other);
+	    			int ending = 0;
+	    			for(ending = 0; ending < 3000; ending++){ //just in case the receiver doesn't get the last empty paquet
+	    				// not the optimal way to end the connection
+	    				pfds[0].fd = sockFd;
+				    	pfds[0].events = POLLIN;
+    				    pollRet = poll(pfds, 1, 1);
+    				    if(pollRet > 0){
+    				    	char decbuf[12];
+			                rcvlen = recvfrom(sockFd, decbuf, 12, 0, (struct sockaddr *) &si_other, &slen);
+			                manageThisAck(decbuf, &lastAck, &receiverWindow, rcvlen);
+			                seqNum = lastAck; //for the last paquet
+			    			fillPacket(pkt, buf, sendLen, seqNum, senderWin);
+			    	    	sendPaquet(pkt, sockFd, si_other);
+    				    }
+    				    usleep(1);
+	    			}		
+				    return 1;
 	    		}
-	    		else{
+	    		else{ // not the last paquet
 					buf = calloc(1, sendLen);
 					memcpy(buf, fileBuffer + currentOffset, sendLen);
-					if(currentOffset+ sendLen == fileMaxOffset){
-						printf("\nDERNIER PAYLOAD\n");	
-						buf[sendLen] = EOF;
-					}
 					fillPacket(pkt, buf, sendLen, seqNum, senderWin);
-					// printf("%s\n\n\n\n_________________________\n%s\n\n\n\n", buf, pkt_get_payload(pkt));
-					// printf("buf length: %d     payload length: %d\n", strlen(buf), pkt_get_length(pkt));
-					// printf("%s",  buf);
-					// printf("\n%c    %d\n",  buf[sendLen - 1], sendLen);
-
 					free(buf);
+					sendPaquet(pkt, sockFd, si_other);
+					sent ++;
+					addToBuffer(presentInBuffer, waitingInBuffer, timeBuffer, fileProgressionBuffer, &currentOffset, pkt, &msTime);
 				}
-				// printf("%.*s\n", pkt_get_length(pkt), pkt_get_payload(pkt));
-				// printf("%s\n", pkt_get_payload(pkt));
-
-
-				// printf("\nsent paquet : \n%s\n", pkt_get_payload(pkt));
-				sendPaquet(pkt, sockFd, si_other);
-				sent ++;
-				addToBuffer(presentInBuffer, waitingInBuffer, timeBuffer, fileProgressionBuffer, &currentOffset, pkt, &msTime);
 				currentOffset = currentOffset + sendLen;
-
 	    		seqNum = seqNum + 1;
 	    		if(seqNum>255){
 	    			seqNum = 0;
 	    		}
 	    	}
 	    }
-    	// poll: checking for ack (end of the loop)
+    	//checking for ack
     	pfds[0].fd = sockFd;
 	    pfds[0].events = POLLIN;
 	    pollRet = poll(pfds, 1, 1);
@@ -330,9 +328,9 @@ int main(int argc, char* argv[]){
             manageThisAck(decbuf, &lastAck, &receiverWindow, rcvlen);
 	    }
 	    tryEmptyingBuffer(presentInBuffer, waitingInBuffer, timeBuffer, fileProgressionBuffer, lastAck);
-	    if(bufferEmpty(presentInBuffer) == 1 && allSent==1){
-	    	done = 1;
-	    }
+	    // if(bufferEmpty(presentInBuffer) == 1 && allSent>10){
+	    // 	done = 1;
+	    // }
     }
 
 
