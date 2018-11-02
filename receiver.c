@@ -98,20 +98,7 @@ void sendAck(int sockFd, struct sockaddr_in6 si_other, uint8_t nextSeqnum, uint8
 }
 
 
-void testRecv(int sockFd, struct sockaddr_in6 si_me, struct sockaddr_in6 si_other, int slen){
-	char buf[MAXPKTSIZE];
-	bzero(buf, MAXPKTSIZE);
-	char decbuf[12];
-	int rcvlen = recvfrom(sockFd, decbuf, 12, 0, (struct sockaddr *) &si_other, &slen);
-	printf("received\n");
-	int len = 30;
-	char * buff = malloc(len);
-	strcpy(buff, "hello from receiver");
-	sendto(sockFd, buff, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
-}
-
 int main(int argc, char* argv[]){
-	printf("IL FAUT PRINT SUR L ENTREE STANDARD (QUI PEUT ETRE REDIRIGÉE SUR UN FICHIER)\n");
 	int i;
     int interpreter=1;
     void *fileToWrite=NULL, *hostname=NULL, *portPt=NULL;
@@ -177,20 +164,24 @@ int main(int argc, char* argv[]){
 		pkt_del(rcvdPkt);
 		rcvdPkt = pkt_new();
 		int decRet = pkt_decode(buf, rcvlen, rcvdPkt);
-		printf("%d is the type received\n",pkt_get_type(rcvdPkt) );
+		// printf("%d is the type received\n",pkt_get_type(rcvdPkt) );
 		if(decRet == PKT_OK){
 			if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_tr(rcvdPkt) == 1){
 				//send NACK nextSeqnum est le seqnum du recu qui est tronque
 				sendAck(sockFd, si_other, pkt_get_seqnum(rcvdPkt), 0, getFreeSpace(presentInBuffer, waitingInBuffer));
 				lastAckSent = nextSeqnum;
 			}
-			else{
-				printf("received seqnum : %u\n", (uint8_t)pkt_get_seqnum(rcvdPkt));
-				printf("expected seqnum : %u\n", nextSeqnum);
+			else{ 
+				if((uint8_t)pkt_get_seqnum(rcvdPkt) != nextSeqnum){
+					printf("WRONG SEQNUM received: %u    expected: %u\n", (uint8_t)pkt_get_seqnum(rcvdPkt), nextSeqnum);
+					// WRONG SEQNUM received: 62    expected: 64
+				}
+				// fprintf(stderr, "received seqnum : %u\n", (uint8_t)pkt_get_seqnum(rcvdPkt));
+				// fprintf(stderr, "expected seqnum : %u\n", nextSeqnum);
 				if(pkt_get_type(rcvdPkt) == PTYPE_DATA && pkt_get_length(rcvdPkt) == 0 && pkt_get_seqnum(rcvdPkt) == lastAckSent){
 					//send ACK + close connection
 					sendAck(sockFd, si_other, ++nextSeqnum%255, 1, getFreeSpace(presentInBuffer, waitingInBuffer));
-					printf("ENDING CONNECTION (last paquet received)\n");
+					// printf("ENDING CONNECTION (last paquet received)\n");
 					//finir la connection que si on a des unacked
 					receivedLastPaquet = 1;
 				}
@@ -215,14 +206,14 @@ int main(int argc, char* argv[]){
 				nextSeqnum = checkBuffer(presentInBuffer, waitingInBuffer, nextSeqnum, fp, interpreter);
 				//send ACK (if window = 0 : don t send)
 				int freeSpace = getFreeSpace(presentInBuffer, waitingInBuffer);
-				printf("free space : %d\n", freeSpace);
+				// printf("free space : %d\n", freeSpace);
 				sendAck(sockFd, si_other, nextSeqnum, 1, freeSpace);
-				printf("ACK SENT\n");
+				// printf("ACK SENT\n");
 				lastAckSent = nextSeqnum;
 			}
 		}
 		else{
-			printf(" decode error : %u\n", decRet);
+			fprintf(stderr, " decode error : %u\n", decRet);
 		}
 		// receivedLastPaquet = 1; //remove this
 	}

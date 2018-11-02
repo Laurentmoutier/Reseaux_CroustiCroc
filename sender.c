@@ -38,16 +38,8 @@ void resend(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int i,
 }
 
 void sendPaquet(pkt_t * pkt, int sockFd, struct sockaddr_in6 si_other){
-	printf("window: %u\n", pkt_get_window(pkt));
-	printf("TR: %u\n", pkt_get_tr(pkt));
-	printf("type(1=data): %u\n", pkt_get_type(pkt));
-	printf("length: %u\n", pkt_get_length(pkt));
-	printf("seqnum: %u\n", pkt_get_seqnum(pkt));
-	printf("crc1: %u\n", pkt_get_crc1(pkt));
 	int payLength = pkt_get_length(pkt);
 	size_t totalSize = sizeof(pkt_t) + payLength - sizeof(char*);
-	printf("paylength : %u     total size : %u\n", payLength, totalSize);
-
 	char * buf;
 	size_t len;
 	uint16_t pkt_len = pkt_get_length(pkt);
@@ -58,7 +50,6 @@ void sendPaquet(pkt_t * pkt, int sockFd, struct sockaddr_in6 si_other){
 	}
 	buf = malloc(len);
 	pkt_status_code encodeRet = pkt_encode(pkt, buf, &len);
-	printf("encode ret when encoding : %u    (len=%u)\n", encodeRet,len);
 	sendto(sockFd, buf, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
 	free(buf);
 }
@@ -80,13 +71,13 @@ int checkTimer(uint8_t * presentInBuffer ,double msTime, pkt_t ** waitingInBuffe
 			sent ++;
 			if(timeBuffer[i] + TIMER < msTime ){
 				resend(msTime, waitingInBuffer, timeBuffer, i, sockFd, si_other);
-				printf("resending from buffer!!! \n");
+				// fprintf(stderr, "resending from buffer, timer expired\n");
 			}
 		}
 	}
 	return sent;
 }
-void fillPacket(pkt_t * pkt, void * buf, uint16_t len, uint8_t seq, int senderWin){
+void fillPacket(pkt_t * pkt, char * buf, uint16_t len, uint8_t seq, int senderWin){
 	pkt_set_type(pkt, PTYPE_DATA);
     pkt_set_length(pkt, len);
     pkt_set_tr(pkt, 0);
@@ -96,15 +87,30 @@ void fillPacket(pkt_t * pkt, void * buf, uint16_t len, uint8_t seq, int senderWi
 	uint32_t crc = 0;
     crc = crc32(crc, (Bytef *)(pkt), sizeof(uint64_t));
     pkt_set_crc1(pkt, crc);
+    if(buf[len] == EOF){
+    	printf("END OF FILE\n");
+    }
     if(len!=0){
-		char * pay = malloc(len);
+		// printf("\n\nlen:  %d     \n%s\n", len,  buf);
+		char * pay = calloc(len, sizeof(char));
+		// char pay[len*sizeof(char)] = {'\0'};
 		memcpy(pay, buf, len);
-		pkt_set_payload(pkt, buf, len);
+		// printf("\n%s\n", pay);
+		// printf("\n%c\n", pay[len]);
+		
+
+
+		pay[len] = '\0';
+
+		pkt_set_payload(pkt, pay, len);
 		crc = 0;
 	    crc = crc32(crc, (Bytef *)(pkt->payload), len);
 	    pkt_set_crc2(pkt, crc);
+  //   	printf("\nstrlen(buf): %d   strlen(pay): %d    strlen(pkt_get_payload(pkt)): %d\n\n", strlen(buf), strlen(pay), strlen(pkt_get_payload(pkt)));
+		// printf("%s\n", pkt_get_payload(pkt));
 	    free(pay);
 	}
+
 }
 void addToBuffer(uint8_t * presentInBuffer, pkt_t ** waitingInBuffer, double * timeBuffer, int* fileProgressionBuffer, int* currentOffset, pkt_t * pkt, double* msTime){
 	int i =0;
@@ -126,7 +132,7 @@ int nextPktLen( int * currentOffset, int fileMaxOffset){
 	if(fileMaxOffset - *currentOffset <= 0){ //last paquet
 		len = 0;
 	}
-	printf("%u\n", len);
+	// printf("%u\n", len);
 	return len;
 }
 
@@ -134,7 +140,7 @@ void manageThisAck(char * decbuf, uint8_t * lastAck, unsigned int * receiverWind
 	pkt_t * pkt = pkt_new();
 	pkt_status_code pktDec = pkt_decode(decbuf, len, pkt);
 	*receiverWindow = pkt_get_window(pkt); //VRIFIER TYPE NACK OU ACK
-	printf("%u <<<= window  (status code = %u)\n",  pkt_get_window(pkt), pktDec);
+	// printf("%u <<<= window  (status code = %u)\n",  pkt_get_window(pkt), pktDec);
 	if (*lastAck != pkt_get_seqnum(pkt)){
 		*lastAck = pkt_get_seqnum(pkt);
 	}
@@ -173,31 +179,6 @@ int bufferEmpty(uint8_t * presentInBuffer){
 	return 1;
 }
 
-int sendTest(int sockFd, struct sockaddr_in6 si_other, int slen, int pollRet, char * fileBuffer){
-    struct pollfd pfds[1];
-	int len = 30;
-	char * buff = malloc(len);
-	strcpy(buff, "hello from sender");
-	if(pollRet>0){
-		printf("sending:\n");
-		sendto(sockFd, buff, len,0,(struct sockaddr *) &si_other, sizeof(si_other));
-		printf("SENT\n");
-	}
-	pfds[0].fd = sockFd;
-	pfds[0].events = POLLIN;
-	pollRet = poll(pfds, 1, 1);
-	if(pollRet >0){ //received an ack
-		printf("received\n");
-		char decbuf[12];
-		int rcvlen = recvfrom(sockFd, decbuf, 12, 0, (struct sockaddr *) &si_other, &slen);
-		// manageThisAck(decbuf, &lastAck, &receiverWindow, rcvlen);
-	}
-	else{
-		pollRet = 0;
-	}
-	return pollRet;
-}
-
 int main(int argc, char* argv[]){
 	int i = 1;
     int interpreter=1;
@@ -219,45 +200,38 @@ int main(int argc, char* argv[]){
     ffp = stdin;
     char * fileBuffer;
     unsigned int fileMaxOffset;
+    int readBytes = 0;
     if(interpreter==0){
-    	printf("reading from file\n");
     	ffp = fopen(fileToRead, "rb");
     	fseek(ffp, 0, SEEK_END);
     	fileMaxOffset= ftell(ffp); // gets the end of the file
     	rewind(ffp);
     	fileBuffer = (char *)malloc((fileMaxOffset+1)*sizeof(char));
     	fread(fileBuffer, fileMaxOffset, 1, ffp);
-    	printf("%s", fileBuffer);
+    	readBytes = fileMaxOffset;
+    	// printf("%s", fileBuffer);
     } 
     else{
-    	printf("reading from stdin\n");
     	char * tmpBuff;
     	int iterSize = 4*sizeof(char);
     	int bufferSize = iterSize;
-    	int readBytes = 0;
     	int minus = 0;
     	char tmp[iterSize];
-    	fileBuffer = malloc(iterSize*sizeof(char));
+    	fileBuffer = malloc(iterSize*sizeof(char) + 1);
     	while(fgets(tmp, iterSize, ffp)){
     		if(readBytes >= bufferSize){
-    			bufferSize = bufferSize*2*sizeof(char);
+    			bufferSize = (bufferSize-1)*2*sizeof(char) +1;
     			tmpBuff = malloc(bufferSize);
     			memcpy(tmpBuff, fileBuffer, readBytes);
     			free(fileBuffer);
     			fileBuffer = tmpBuff;
-    			printf("new size : %u\n", bufferSize);
     		}
     		memcpy(fileBuffer+readBytes, tmp, strlen(tmp));
     		readBytes += strlen(tmp);
     	}
     	fileMaxOffset = readBytes;
-    	printf("\nbuff len : %u    %u\n", readBytes, strlen(fileBuffer));
-    	printf("%s\n", fileBuffer);
     }
-
-
-
-
+    fileBuffer[readBytes] = EOF;
     struct sockaddr_in6 si_other;
     int slen = sizeof(si_other);
 	bzero((char *)&si_other,slen);
@@ -267,18 +241,6 @@ int main(int argc, char* argv[]){
     if (sockFd == -1){
         return 2; // error
     }
-    // fflush(stdin);
-    // FILE * fp;
-    // if(fileToRead!=NULL){
-    //     fp = fopen(fileToRead, "rb"); //was "wb"
-    // }
-    // fseek(fp, 0, SEEK_END);
-    // unsigned int fileMaxOffset= ftell(fp); // gets the end of the file
-    // rewind(fp);
-    // char * fileBuffer;
-    // fileBuffer = (char *)malloc((fileMaxOffset+1)*sizeof(char)); // si probleme: peut etre que fichier trop gros pr la memoire du pc
-    // fread(fileBuffer, fileMaxOffset, 1, fp);
-
     int currentOffset = 0;
     uint8_t done = 0;
     struct pollfd pfds[1];
@@ -307,9 +269,6 @@ int main(int argc, char* argv[]){
     size_t sendLen = 0;
     int allSent = 0;
     while(!done){
-    	printf("rwin:  %d\n", receiverWindow);
-    	usleep(500000);
-    	// pollRet = sendTest(sockFd, si_other, slen, pollRet);
     	// check retransmission timers and retransmit
     	sent = 0;
 	    gettimeofday(&tv, NULL);
@@ -319,54 +278,38 @@ int main(int argc, char* argv[]){
 	    	sent = checkTimer(presentInBuffer ,msTime, waitingInBuffer,  timeBuffer,fileProgressionBuffer, sockFd, si_other, receiverWindow);
 	    	//sent = nb in the buffer (ie: paquets that are still considered as traveling in the network)
 	    }
-	    // printf("sent = %d\n", sent);
 	    if(receiverWindow - sent > 0){
 	    	//sending a new paquet
 	    	if(bufferIsFree(presentInBuffer) == 1){// if buffer full: cannot send (all previous sends are awaiting ack)
 	    		//make paquet
 				pkt_t * pkt = pkt_new();
-				
 	    		sendLen = nextPktLen(&currentOffset, fileMaxOffset); //payload length
 	    		if(sendLen == 0){
 	    			allSent = 1;
 	    			seqNum = lastAck; //for the last paquet
 	    			fillPacket(pkt, buf, sendLen, seqNum, senderWin);
-
-	    			// printf("window: %u\n", pkt_get_window(pkt));
-	    			// printf("TR: %u\n", pkt_get_tr(pkt));
-	    			// printf("type(1=data): %u\n", pkt_get_type(pkt));
-	    			// printf("length: %u\n", pkt_get_length(pkt));
-	    			// printf("seqnum: %u\n", pkt_get_seqnum(pkt));
-
-	    			// size_t leen = 12;
-	    			// char bufa[leen];
-	    			// pkt_status_code aa = pkt_encode(pkt, bufa, &leen);
-	    			// pkt_t * decodPkt = pkt_new();
-	    			// printf("decoded check : %u   (encode:%u)\n", pkt_decode(bufa, 12, decodPkt), aa);
 	    		}
 	    		else{
 					buf = calloc(1, sendLen);
 					memcpy(buf, fileBuffer + currentOffset, sendLen);
+					if(currentOffset+ sendLen == fileMaxOffset){
+						printf("\nDERNIER PAYLOAD\n");	
+						buf[sendLen] = EOF;
+					}
 					fillPacket(pkt, buf, sendLen, seqNum, senderWin);
-
-					// printf("window: %u\n", pkt_get_window(pkt));
-					// printf("TR: %u\n", pkt_get_tr(pkt));
-					// printf("type(1=data): %u\n", pkt_get_type(pkt));
-					// printf("length: %u\n", pkt_get_length(pkt));
-					// printf("seqnum: %u\n", pkt_get_seqnum(pkt));
-					// size_t leen = 16+sendLen;
-					// char bufa[leen];
-					// pkt_status_code aa = pkt_encode(pkt, bufa, &leen);
-					// pkt_t * decodPkt = pkt_new();
-					// printf("decoded check : %u (encode:%u)\n", pkt_decode(bufa, 16+sendLen, decodPkt), aa);
-
+					// printf("%s\n\n\n\n_________________________\n%s\n\n\n\n", buf, pkt_get_payload(pkt));
+					// printf("buf length: %d     payload length: %d\n", strlen(buf), pkt_get_length(pkt));
+					// printf("%s",  buf);
+					// printf("\n%c    %d\n",  buf[sendLen - 1], sendLen);
 
 					free(buf);
 				}
-				sendPaquet(pkt, sockFd, si_other);
-				
-				
+				// printf("%.*s\n", pkt_get_length(pkt), pkt_get_payload(pkt));
+				// printf("%s\n", pkt_get_payload(pkt));
 
+
+				// printf("\nsent paquet : \n%s\n", pkt_get_payload(pkt));
+				sendPaquet(pkt, sockFd, si_other);
 				sent ++;
 				addToBuffer(presentInBuffer, waitingInBuffer, timeBuffer, fileProgressionBuffer, &currentOffset, pkt, &msTime);
 				currentOffset = currentOffset + sendLen;
@@ -384,15 +327,12 @@ int main(int argc, char* argv[]){
 	    if(pollRet >0){ //received an ack
 	    	char decbuf[12];
             rcvlen = recvfrom(sockFd, decbuf, 12, 0, (struct sockaddr *) &si_other, &slen);
-            printf("ACK RECEIVED\n" );
             manageThisAck(decbuf, &lastAck, &receiverWindow, rcvlen);
 	    }
 	    tryEmptyingBuffer(presentInBuffer, waitingInBuffer, timeBuffer, fileProgressionBuffer, lastAck);
 	    if(bufferEmpty(presentInBuffer) == 1 && allSent==1){
-	    	printf("buffer is empty: all sent\n");
 	    	done = 1;
 	    }
-	    // done = 1; // erase this
     }
 
 
