@@ -36,12 +36,16 @@ void addTobuffer(uint8_t * presentInBuffer, pkt_t ** waitingInBuffer, pkt_t * rc
 		}
 	}
 }
-int checkBuffer(uint8_t * presentInBuffer, pkt_t ** waitingInBuffer, uint8_t nextSeqnum, FILE * fp){
+int checkBuffer(uint8_t * presentInBuffer, pkt_t ** waitingInBuffer, uint8_t nextSeqnum, FILE * fp, int interpreter){
 	//checks the buffer for paquet that can be written in the file (if its seqNum is the next expected seqNum)
 	int i =0;
 	for(i =0; i < MAXWIN; i++){
 		if(presentInBuffer[i] != 0 && pkt_get_seqnum(waitingInBuffer[i]) == nextSeqnum){
-			fwrite(pkt_get_payload(waitingInBuffer[i]),1,pkt_get_length(waitingInBuffer[i]),fp);
+			if(interpreter == 0){
+				fwrite(pkt_get_payload(waitingInBuffer[i]),1,pkt_get_length(waitingInBuffer[i]),fp);
+			}else{
+				fprintf(stdout, "%s", pkt_get_payload(waitingInBuffer[i]));
+			}
 			pkt_del(waitingInBuffer[i]);
 			waitingInBuffer[i] = NULL;
 			presentInBuffer[i] = 0;
@@ -49,7 +53,7 @@ int checkBuffer(uint8_t * presentInBuffer, pkt_t ** waitingInBuffer, uint8_t nex
 			if(nextSeqnum > 255){
 				nextSeqnum = 0;
 			}
-			nextSeqnum = checkBuffer(presentInBuffer, waitingInBuffer, nextSeqnum, fp);
+			nextSeqnum = checkBuffer(presentInBuffer, waitingInBuffer, nextSeqnum, fp, interpreter);
 			return nextSeqnum;
 		}
 	}
@@ -107,6 +111,7 @@ void testRecv(int sockFd, struct sockaddr_in6 si_me, struct sockaddr_in6 si_othe
 }
 
 int main(int argc, char* argv[]){
+	printf("IL FAUT PRINT SUR L ENTREE STANDARD (QUI PEUT ETRE REDIRIGÉE SUR UN FICHIER)\n");
 	int i;
     int interpreter=1;
     void *fileToWrite=NULL, *hostname=NULL, *portPt=NULL;
@@ -159,7 +164,7 @@ int main(int argc, char* argv[]){
 		presentInBuffer[i] = 0;
 	}
 	uint8_t waiting = 0;
-    if(fileToWrite!=NULL){	
+    if(interpreter == 0){	
         fp = fopen(fileToWrite, "wa"); //was "wb" pour binary essayer avec b
     }
     unsigned int lastAckSent = 0;
@@ -191,7 +196,11 @@ int main(int argc, char* argv[]){
 				}
 				cleanBuffer(presentInBuffer, waitingInBuffer, (uint8_t)pkt_get_seqnum(rcvdPkt));
 				if((uint8_t)pkt_get_seqnum(rcvdPkt) == nextSeqnum){ //le paquet qu on attendait
-					fwrite(pkt_get_payload(rcvdPkt),1,pkt_get_length(rcvdPkt),fp);
+					if(interpreter == 0){
+						fwrite(pkt_get_payload(rcvdPkt),1,pkt_get_length(rcvdPkt),fp);
+					}else{
+						fprintf(stdout, "%s", pkt_get_payload(rcvdPkt));
+					}
 					nextSeqnum ++;
 					if (nextSeqnum > 255){
 						nextSeqnum = 0;
@@ -203,7 +212,7 @@ int main(int argc, char* argv[]){
 						addTobuffer(presentInBuffer, waitingInBuffer, rcvdPkt);
 					}				
 				}
-				nextSeqnum = checkBuffer(presentInBuffer, waitingInBuffer, nextSeqnum, fp);
+				nextSeqnum = checkBuffer(presentInBuffer, waitingInBuffer, nextSeqnum, fp, interpreter);
 				//send ACK (if window = 0 : don t send)
 				int freeSpace = getFreeSpace(presentInBuffer, waitingInBuffer);
 				printf("free space : %d\n", freeSpace);

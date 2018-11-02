@@ -38,7 +38,6 @@ void resend(double msTime, pkt_t ** waitingInBuffer, double * timeBuffer, int i,
 }
 
 void sendPaquet(pkt_t * pkt, int sockFd, struct sockaddr_in6 si_other){
-
 	printf("window: %u\n", pkt_get_window(pkt));
 	printf("TR: %u\n", pkt_get_tr(pkt));
 	printf("type(1=data): %u\n", pkt_get_type(pkt));
@@ -48,7 +47,6 @@ void sendPaquet(pkt_t * pkt, int sockFd, struct sockaddr_in6 si_other){
 	int payLength = pkt_get_length(pkt);
 	size_t totalSize = sizeof(pkt_t) + payLength - sizeof(char*);
 	printf("paylength : %u     total size : %u\n", payLength, totalSize);
-
 
 	char * buf;
 	size_t len;
@@ -201,12 +199,11 @@ int sendTest(int sockFd, struct sockaddr_in6 si_other, int slen, int pollRet, ch
 }
 
 int main(int argc, char* argv[]){
-    printf("sender\n");
-	int i;
+	int i = 1;
     int interpreter=1;
     void *fileToRead=NULL, *hostname=NULL, *portPt=NULL;
     uint16_t port;
-    for (i=1; i<argc; i++){ // manager exceptions : si argc =1 ou argc >5 ou pas -f et argc>3 on exit : nbr d'aruments trop faible
+    for (i=1; i<argc; i++){ // manager exceptions : si arc =1 ou argc >5 ou pas -f er argc>3 on exit : nbr d'aruments trop faible
         if(!strcmp(argv[i], "-f")){ //il faudra prendre en compte le "<"
             i=i+1;
             fileToRead=argv[i];
@@ -218,49 +215,70 @@ int main(int argc, char* argv[]){
             port = atoi((const char*)portPt);
         }
     }
+    FILE * ffp;
+    ffp = stdin;
+    char * fileBuffer;
+    unsigned int fileMaxOffset;
+    if(interpreter==0){
+    	printf("reading from file\n");
+    	ffp = fopen(fileToRead, "rb");
+    	fseek(ffp, 0, SEEK_END);
+    	fileMaxOffset= ftell(ffp); // gets the end of the file
+    	rewind(ffp);
+    	fileBuffer = (char *)malloc((fileMaxOffset+1)*sizeof(char));
+    	fread(fileBuffer, fileMaxOffset, 1, ffp);
+    	printf("%s", fileBuffer);
+    } 
+    else{
+    	printf("reading from stdin\n");
+    	char * tmpBuff;
+    	int iterSize = 4*sizeof(char);
+    	int bufferSize = iterSize;
+    	int readBytes = 0;
+    	int minus = 0;
+    	char tmp[iterSize];
+    	fileBuffer = malloc(iterSize*sizeof(char));
+    	while(fgets(tmp, iterSize, ffp)){
+    		if(readBytes >= bufferSize){
+    			bufferSize = bufferSize*2*sizeof(char);
+    			tmpBuff = malloc(bufferSize);
+    			memcpy(tmpBuff, fileBuffer, readBytes);
+    			free(fileBuffer);
+    			fileBuffer = tmpBuff;
+    			printf("new size : %u\n", bufferSize);
+    		}
+    		memcpy(fileBuffer+readBytes, tmp, strlen(tmp));
+    		readBytes += strlen(tmp);
+    	}
+    	fileMaxOffset = readBytes;
+    	printf("\nbuff len : %u    %u\n", readBytes, strlen(fileBuffer));
+    	printf("%s\n", fileBuffer);
+    }
 
-// pkt_t * pktt = pkt_new();
-// pkt_set_type(pktt, 1);
-// pkt_set_tr(pktt, 0); // tr = 0 pour crc
-// pkt_set_window(pktt, 13);
-// pkt_set_seqnum(pktt, 13);
-// pkt_set_length(pktt, 0);
-// pkt_set_timestamp(pktt, 7);
-// uint32_t crc = 0;
-// crc = crc32(crc, (Bytef *)(pktt), sizeof(uint64_t));
-// pkt_set_crc1(pktt, crc);
-// size_t leen = 12;
-// char bufa[leen];
-// pkt_encode(pktt, bufa, &leen);
-// printf("%s\n", );
-// pkt_t * decodPkt = pkt_new();
-// printf("%u decoded\n", pkt_decode(bufa, 12, decodPkt));
 
-// return 2;
+
 
     struct sockaddr_in6 si_other;
     int slen = sizeof(si_other);
 	bzero((char *)&si_other,slen);
 	si_other.sin6_port = htons(port);
 	si_other.sin6_family = AF_INET6;
-	// if (inet_pton(AF_INET6,hostname , &si_other.sin6_addr) == 0){
- //    	return 1; // error
- //    }
     int sockFd = socket(AF_INET6, SOCK_DGRAM, 0);
     if (sockFd == -1){
         return 2; // error
     }
-    fflush(stdin);
-    FILE * fp;
-    if(fileToRead!=NULL){
-        fp = fopen(fileToRead, "rb"); //was "wb"
-    }
-    fseek(fp, 0, SEEK_END);
-    unsigned int fileMaxOffset= ftell(fp); // gets the end of the file
-    rewind(fp);
-    char * fileBuffer;
-    fileBuffer = (char *)malloc((fileMaxOffset+1)*sizeof(char)); // si probleme: peut etre que fichier trop gros pr la memoire du pc
-    fread(fileBuffer, fileMaxOffset, 1, fp);
+    // fflush(stdin);
+    // FILE * fp;
+    // if(fileToRead!=NULL){
+    //     fp = fopen(fileToRead, "rb"); //was "wb"
+    // }
+    // fseek(fp, 0, SEEK_END);
+    // unsigned int fileMaxOffset= ftell(fp); // gets the end of the file
+    // rewind(fp);
+    // char * fileBuffer;
+    // fileBuffer = (char *)malloc((fileMaxOffset+1)*sizeof(char)); // si probleme: peut etre que fichier trop gros pr la memoire du pc
+    // fread(fileBuffer, fileMaxOffset, 1, fp);
+
     int currentOffset = 0;
     uint8_t done = 0;
     struct pollfd pfds[1];
